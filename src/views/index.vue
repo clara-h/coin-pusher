@@ -131,7 +131,7 @@ export default {
             visible: false
           },
           friction: 0.1, // 降低摩擦力
-          restitution: 0.3 // 增加弹性
+          restitution: 0.9 // 增加弹性
         }),
         // 收集区域平台 - 底板 (保持原样，不改变倾斜度和其他属性)
         this.Bodies.rectangle(this.collectionArea.x, 
@@ -142,6 +142,18 @@ export default {
             fillStyle: 'rgba(156, 39, 176, 0.5)',
             visible: true
           }
+        }),
+        // 掉落区域上方的长条障碍物
+        this.Bodies.rectangle(200, this.dropArea.y, 400, 10, { 
+          isStatic: true, 
+          // angle: Math.PI * 0.03, // 略微倾斜，增加趣味性
+          chamfer: { radius: 2 }, // 轻微圆角
+          render: { 
+            fillStyle: '#f44336',
+            visible: true
+          },
+          friction: 0.1, // 较小的摩擦力
+          restitution: 0.5 // 中等弹性
         })
       ]
 
