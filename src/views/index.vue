@@ -3,7 +3,6 @@
     <button @click="DropCoins" class="drop-button">掉落金币</button>
     <div class="game-area">
       <div ref="coinBox" class="coin-box">
-        <div class="collection-area">金币收集区域 (及最终堆落的位置)</div>
       </div>
       <div class="total-value">当前总额: {{ totalValue }}元</div>
     </div>
@@ -61,7 +60,9 @@ export default {
         maxCoinsToRelease: 5, // 一次最多释放几个金币
         cooldown: 1000,   // 冷却时间(毫秒)
         lastReleaseTime: 0    // 上次释放时间
-      }
+      },
+      // 缓存纹理
+      _coinTextureCache: null
     }
   },
   mounted() {
@@ -73,13 +74,13 @@ export default {
       console.log('初始化物理引擎')
       // 创建引擎
       this.engine = this.Engine.create({
-        positionIterations: 8, // 增加位置迭代次数提高精度
-        velocityIterations: 6  // 增加速度迭代次数提高精度
+        positionIterations: 6, // 降低位置迭代次数，从8减为6
+        velocityIterations: 4  // 降低速度迭代次数，从6减为4
       })
       
       // 调整引擎重力
-      this.engine.gravity.y = 1.2 // 增加重力使金币掉落更快
-      this.engine.gravity.scale = 0.002 // 调整重力系数
+      this.engine.gravity.y = 1.2 
+      this.engine.gravity.scale = 0.002
       
       // 创建渲染器
       this.render = this.Render.create({
@@ -208,6 +209,13 @@ export default {
     },
     DropCoins() {
       console.log('掉落金币')
+      // 限制最大金币数量，避免性能问题
+      if (this.coins.length > 100) {
+        console.log('金币数量过多，暂停掉落')
+        alert('金币太多了！清理一些再继续。')
+        return
+      }
+      
       const coinCount = Math.floor(Math.random() * 5) + 3 // 随机3-7个金币
       const coinValues = [1, 5, 10, 25, 50] // 金币面值
       
@@ -294,6 +302,12 @@ export default {
     },
     // 创建金币纹理
     createCoinTexture(value) {
+      // 使用缓存减少重复创建
+      const cacheKey = `coin_${value}`;
+      if (this._coinTextureCache && this._coinTextureCache[cacheKey]) {
+        return this._coinTextureCache[cacheKey];
+      }
+      
       // 创建离屏 canvas
       const canvas = document.createElement('canvas')
       canvas.width = 35
@@ -333,7 +347,15 @@ export default {
       ctx.textBaseline = 'middle'
       ctx.fillText(value.toString(), 17.5, 17.5)
       
-      return canvas.toDataURL()
+      const texture = canvas.toDataURL();
+      
+      // 缓存纹理
+      if (!this._coinTextureCache) {
+        this._coinTextureCache = {};
+      }
+      this._coinTextureCache[cacheKey] = texture;
+      
+      return texture
     },
     // 模拟播放碰撞音效
     playCollisionSound() {
@@ -353,33 +375,46 @@ export default {
         return;
       }
       
+      // 性能优化：如果金币少于阈值的一半，则不进行检测
+      if (this.coins.length < this.pressureSystem.threshold / 2) {
+        return;
+      }
+      
       // 检查是否有金币触碰到顶部障碍物
       const topObstacleY = this.dropArea.y + 10; // 障碍物位置加上半高
-      const coinsNearTopObstacle = this.coins.filter(coin => 
+      // 只检查部分金币而不是全部
+      const sampleCoins = this.coins.slice(0, Math.min(this.coins.length, 20));
+      const coinsNearTopObstacle = sampleCoins.filter(coin => 
         Math.abs(coin.position.y - topObstacleY) < 30 && // 接近顶部障碍物
         Math.abs(coin.velocity.y) < 0.5 // 速度很小，表示已经停止或堆积
       );
       
       // 如果有金币接触顶部障碍物，检查底板上的金币堆积情况
       if (coinsNearTopObstacle.length > 0) {
-        console.log("检测到金币触碰顶部障碍物");
-        
-        // 获取底板上方的金币
+        // 获取底板上方的金币 - 使用采样而不是检查全部金币
         const platform = this.platformMotion.platform;
-        const coinsAbovePlatform = this.coins.filter(coin => 
+        const coinsSample = this.coins.filter((_, index) => index % 3 === 0); // 只取三分之一的金币
+        const coinsAbovePlatform = coinsSample.filter(coin => 
           Math.abs(coin.position.x - platform.position.x) < this.collectionArea.width/2 && // 在底板上方
           Math.abs(coin.position.y - platform.position.y) < 80 && // 靠近底板
           coin.position.y < platform.position.y // 在底板上方
         );
         
-        // 如果底板上的金币数量超过阈值，执行压力释放
-        if (coinsAbovePlatform.length >= this.pressureSystem.threshold) {
-          console.log(`底板上有${coinsAbovePlatform.length}个金币，超过阈值${this.pressureSystem.threshold}`);
-          
+        // 根据采样估算总数
+        const estimatedTotal = coinsAbovePlatform.length * 3;
+        
+        // 如果估计底板上的金币数量超过阈值，执行压力释放
+        if (estimatedTotal >= this.pressureSystem.threshold) {
           // 找出底板上最底层的金币（受压最大的）
-          const bottomLayerCoins = coinsAbovePlatform
-            .sort((a, b) => b.position.y - a.position.y) // 按Y坐标降序排序
-            .slice(0, Math.min(this.pressureSystem.maxCoinsToRelease, coinsAbovePlatform.length)); // 取前N个
+          // 直接从coins数组中找最下面的几个，而不是排序全部
+          const bottomCoins = this.coins.filter(coin => 
+            Math.abs(coin.position.x - platform.position.x) < this.collectionArea.width/2 &&
+            platform.position.y - coin.position.y < 30 && // 只找最靠近底板的
+            coin.position.y < platform.position.y
+          );
+          
+          const bottomLayerCoins = bottomCoins
+            .slice(0, Math.min(this.pressureSystem.maxCoinsToRelease, bottomCoins.length));
           
           // 让这些金币穿透底板
           bottomLayerCoins.forEach(coin => {
@@ -396,42 +431,35 @@ export default {
               y: 0.05
             });
             
-            // 改变金币颜色，使其闪烁效果
-            const originalRender = coin.render.sprite;
+            // 简化闪烁效果，减少定时器使用
+            coin.render.fillStyle = '#FF5722';
             
-            // 创建闪烁效果
-            let flashCount = 0;
-            const flashInterval = setInterval(() => {
-              if (flashCount > 4) {
-                clearInterval(flashInterval);
-                // 恢复原始碰撞组，但此时已经穿过底板
-                setTimeout(() => {
-                  coin.collisionFilter = originalCollisionFilter;
-                }, 500);
-                return;
-              }
-              
-              // 交替闪烁
-              coin.render.fillStyle = flashCount % 2 === 0 ? '#FF5722' : '#FFC107';
-              flashCount++;
-            }, 100);
+            // 恢复原始碰撞组，但此时已经穿过底板
+            setTimeout(() => {
+              coin.collisionFilter = originalCollisionFilter;
+              coin.render.fillStyle = undefined; // 恢复原始颜色
+            }, 500);
           });
           
           // 更新最后释放时间
           this.pressureSystem.lastReleaseTime = now;
-          
-          console.log(`释放了${bottomLayerCoins.length}个金币通过底板`);
         }
       }
     },
     // 检查金币是否超出边界
     checkCoinsOutOfBounds() {
+      // 性能优化：如果金币较少，则每帧都检查，否则间隔检查
+      if (this.coins.length > 20 && Date.now() % 3 !== 0) {
+        return; // 只在时间戳能被3整除时检查
+      }
+      
       // 获取所有金币，简单检查是否在coins数组中
       const allCoins = this.coins.slice(); // 创建数组副本
-      console.log('allCoins', allCoins)
+      
       // 检查每个金币
       for (let i = allCoins.length - 1; i >= 0; i--) {
         const coin = allCoins[i];
+        
         // 如果金币超出下边界或穿过底板
         if (coin.position.y > 650 || 
             (coin.position.y > this.collectionArea.y + this.collectionArea.height + 100 && 
@@ -447,8 +475,6 @@ export default {
           
           // 从数组中移除
           this.coins.splice(this.coins.indexOf(coin), 1);
-          
-          console.log(`金币掉落界外，已移除并计分: ${coin.value}元`);
         }
       }
     },
@@ -486,6 +512,8 @@ export default {
     if (this.runner) {
       this.Runner.stop(this.runner)
     }
+    // 清理定时器和缓存
+    this._coinTextureCache = null
   }
 }
 </script>
