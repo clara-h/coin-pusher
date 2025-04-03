@@ -27,6 +27,7 @@ export default {
       Composite: Matter.Composite,
       World: Matter.World,
       Events: Matter.Events,
+      Bounds: Matter.Bounds,
       // 实例
       engine: null,
       render: null,
@@ -36,8 +37,8 @@ export default {
       // 区域定义 - 向上移动300像素
       collectionArea: {
         x: 200,  // 中心x坐标
-        y: 100,  // 中心y坐标 (从400减为100)
-        width: 380, // 宽度
+        y: 80,  // 中心y坐标 (从400减为100)
+        width: 400, // 宽度
         height: 100 // 高度
       },
       // 掉落区域定义
@@ -45,6 +46,14 @@ export default {
         minX: 60,  // 左边界
         maxX: 340, // 右边界
         y: 30     // 掉落高度
+      },
+      // 底板移动参数
+      platformMotion: {
+        platform: null,   // 底板对象引用
+        baseY: 0,         // 基准Y位置
+        amplitude: 50,    // 上下移动幅度
+        frequency: 0.02, // 移动频率 - 从0.001增加到0.005，提高移动速度
+        time: 0           // 计时器
       }
     }
   },
@@ -106,43 +115,34 @@ export default {
         this.Bodies.rectangle(410, 300, 20, 600, { 
           isStatic: true, 
           render: { 
-            visible: false 
+            fillStyle: '#999',
+            visible: true 
           } 
         }),
         // 收集区域平台 - 左挡板
-        this.Bodies.rectangle(this.collectionArea.x - this.collectionArea.width/2, 
-                             this.collectionArea.y + this.collectionArea.height/2, 
-                             20, this.collectionArea.height, { 
-          isStatic: true, 
-          render: { 
-            fillStyle: '#999',
-            visible: false
-          },
-          friction: 0.1, // 降低摩擦力
-          restitution: 0.9 // 增加弹性
-        }),
+        // this.Bodies.rectangle(this.collectionArea.x - this.collectionArea.width/2, 
+        //                      this.collectionArea.y + this.collectionArea.height/2, 
+        //                      20, this.collectionArea.height, { 
+        //   isStatic: true, 
+        //   render: { 
+        //     fillStyle: '#999',
+        //     visible: true
+        //   },
+        //   friction: 0.1, // 降低摩擦力
+        //   restitution: 0.9 // 增加弹性
+        // }),
         // 收集区域平台 - 右挡板
-        this.Bodies.rectangle(this.collectionArea.x + this.collectionArea.width/2, 
-                             this.collectionArea.y + this.collectionArea.height/2, 
-                             20, this.collectionArea.height, { 
-          isStatic: true, 
-          render: { 
-            fillStyle: '#999',
-            visible: false
-          },
-          friction: 0.1, // 降低摩擦力
-          restitution: 0.9 // 增加弹性
-        }),
-        // 收集区域平台 - 底板 (保持原样，不改变倾斜度和其他属性)
-        this.Bodies.rectangle(this.collectionArea.x, 
-                             this.collectionArea.y + this.collectionArea.height, 
-                             this.collectionArea.width, 20, { 
-          isStatic: true,
-          render: { 
-            fillStyle: 'rgba(156, 39, 176, 0.5)',
-            visible: true
-          }
-        }),
+        // this.Bodies.rectangle(this.collectionArea.x + this.collectionArea.width/2, 
+        //                      this.collectionArea.y + this.collectionArea.height/2, 
+        //                      20, this.collectionArea.height, { 
+        //   isStatic: true, 
+        //   render: { 
+        //     fillStyle: '#999',
+        //     visible: true
+        //   },
+        //   friction: 0.1, // 降低摩擦力
+        //   restitution: 0.9 // 增加弹性
+        // }),
         // 掉落区域上方的长条障碍物
         this.Bodies.rectangle(200, this.dropArea.y, 400, 10, { 
           isStatic: true, 
@@ -155,31 +155,47 @@ export default {
           friction: 0.1, // 较小的摩擦力
           restitution: 0.5 // 中等弹性
         })
-      ]
+      ];
+
+      // 创建收集区域底板 - 可上下移动
+      const platform = this.Bodies.rectangle(this.collectionArea.x, 
+                          this.collectionArea.y + this.collectionArea.height, 
+                          this.collectionArea.width, 20, { 
+        isStatic: true,
+        render: { 
+          fillStyle: 'rgba(156, 39, 176, 0.5)',
+          visible: true
+        }
+      });
+      
+      // 保存底板引用和基准位置
+      this.platformMotion.platform = platform;
+      this.platformMotion.baseY = this.collectionArea.y + this.collectionArea.height;
+      
+      // 添加底板到墙体数组
+      walls.push(platform);
 
       // 添加边界到世界
-      this.World.add(this.engine.world, walls)
+      this.World.add(this.engine.world, walls);
 
       // 创建运行器
-      this.runner = this.Runner.create()
-      this.Runner.run(this.runner, this.engine)
+      this.runner = this.Runner.create();
+      this.Runner.run(this.runner, this.engine);
 
       // 运行渲染器
-      this.Render.run(this.render)
+      this.Render.run(this.render);
       
       // 添加碰撞事件
       this.Events.on(this.engine, 'collisionStart', (event) => {
         event.pairs.forEach((pair) => {
-          this.playCollisionSound()
-        })
-      })
+          this.playCollisionSound();
+        });
+      });
       
-      console.log('物理引擎初始化完成', {
-        collectionArea: this.collectionArea,
-        dropArea: this.dropArea,
-        engineCreated: !!this.engine,
-        renderCreated: !!this.render
-      })
+      // 添加更新事件，用于移动底板
+      this.Events.on(this.engine, 'beforeUpdate', () => {
+        this.updatePlatformPosition();
+      });
     },
     DropCoins() {
       console.log('掉落金币')
@@ -222,7 +238,7 @@ export default {
           frictionStatic: 0.2, // 减小静摩擦力
           density: 1,    // 稍微减轻重量
           chamfer: { radius: 2 }, // 轻微圆角化
-          mass: 10, // 增加重量
+          mass: 0.1, // 增加重量
           inertia: Infinity, // 设置较大的惯性值，防止旋转
           inverseInertia: 0, // 设置为0，使金币不容易旋转
           render: {
@@ -319,6 +335,37 @@ export default {
     playCoinDropSound() {
       // 这里可以实现实际的音效播放逻辑
       // console.log('播放金币掉落音效')
+    },
+    // 更新底板位置的方法
+    updatePlatformPosition() {
+      if (!this.platformMotion.platform) return;
+      
+      // 更新时间 - 使用固定时间增量，不受帧率影响
+      this.platformMotion.time += 1;
+      
+      // 计算新的Y位置 - 正弦波形运动
+      const newY = this.platformMotion.baseY + 
+                  Math.sin(this.platformMotion.time * this.platformMotion.frequency) * 
+                  this.platformMotion.amplitude;
+      
+      // 不使用Matter.js的Body.setPosition方法，直接设置位置属性
+      // 这样可以避免物理引擎对位置变化的插值计算，确保移动速度恒定
+      const platform = this.platformMotion.platform;
+      
+      // 保存当前位置的差值
+      const deltaY = newY - platform.position.y;
+      
+      // 直接更新位置
+      platform.position.y = newY;
+      platform.positionPrev.y = newY - deltaY; // 更新上一帧位置，保持速度一致
+      
+      // 强制更新所有顶点位置
+      for (let i = 0; i < platform.vertices.length; i++) {
+        platform.vertices[i].y += deltaY;
+      }
+      
+      // 更新边界
+      this.Bounds.update(platform.bounds, platform.vertices, platform.velocity);
     }
   },
   beforeDestroy() {
