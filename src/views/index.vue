@@ -461,6 +461,10 @@ export default {
             // 临时修改金币的碰撞组，使其可以穿透底板
             const originalCollisionFilter = {...coin.collisionFilter};
             
+            // 特别标记这个金币，防止它被checkCoinsOutOfBounds方法清除
+            coin.plugin = coin.plugin || {};
+            coin.plugin.isPenetrating = true;
+            
             // 设置为不与底板碰撞
             coin.collisionFilter.group = -1;
             coin.collisionFilter.mask = 0xFFFFFF;
@@ -478,6 +482,13 @@ export default {
             setTimeout(() => {
               coin.collisionFilter = originalCollisionFilter;
               coin.render.fillStyle = undefined; // 恢复原始颜色
+              
+              // 延迟一段时间后移除穿透标记，允许金币在落到底部障碍物上后稳定一段时间再考虑移除
+              setTimeout(() => {
+                if (coin.plugin) {
+                  coin.plugin.isPenetrating = false;
+                }
+              }, 3000); // 3秒后允许金币正常检查是否超出边界
             }, 500);
           });
           
@@ -493,17 +504,31 @@ export default {
         return; // 只在时间戳能被3整除时检查
       }
       
-      // 获取所有金币，简单检查是否在coins数组中
-      const allCoins = this.coins.slice(); // 创建数组副本
+      // 获取所有金币，创建数组副本
+      const allCoins = this.coins.slice();
       
       // 检查每个金币
       for (let i = allCoins.length - 1; i >= 0; i--) {
         const coin = allCoins[i];
         
-        // 如果金币超出下边界或穿过底板
-        if (coin.position.y > 650 || 
-            (coin.position.y > this.collectionArea.y + this.collectionArea.height + 100 && 
-             Math.abs(coin.velocity.y) > 2)) {
+        // 如果金币有穿透标记，暂时不检查是否超出边界
+        if (coin.plugin && coin.plugin.isPenetrating) {
+          continue;
+        }
+        
+        // 获取可移动障碍物的位置信息
+        const obstacle = this.movableObstacle.body;
+        const obstacleTop = obstacle ? obstacle.bounds.min.y : 600;
+        
+        // 只有当金币完全超出游戏区域或明显超出底部才移除
+        // 如果金币在障碍物上方，不要移除它
+        const isCoinAboveObstacle = obstacle && 
+                                  Math.abs(coin.position.x - obstacle.position.x) < this.movableObstacle.width/2 && 
+                                  coin.position.y < obstacleTop + 30;
+        
+        // 只有当金币超出下边界且不在障碍物上方时才移除
+        if ((coin.position.y > 650 && !isCoinAboveObstacle) || 
+            (coin.position.y > 800)) { // 彻底超出界限的情况
           
           // 从世界和数组中移除金币
           this.World.remove(this.engine.world, coin);
@@ -561,9 +586,16 @@ export default {
           // 计算碰撞情况
           const platformBottom = platformBounds.max.y;
           const obstacleTop = obstacleBounds.min.y - 10;
+          
           // 如果底板底部低于(或等于)障碍物顶部，表示它们碰撞或即将碰撞
           if (platformBottom >= obstacleTop) {
             console.log('障碍物与底板碰撞')
+            
+            // 如果障碍物是静态的，先切换为非静态以便能移动
+            if (obstacle.isStatic) {
+              this.Body.setStatic(obstacle, false);
+            }
+            
             // 移动障碍物，使其与底板保持固定距离
             const newObstacleY = platformBottom + desiredDistanceFromPlatform + (obstacle.bounds.max.y - obstacle.position.y);
             
@@ -572,7 +604,7 @@ export default {
               x: obstacle.position.x,
               y: newObstacleY
             });
-
+            
             // 障碍物停止移动
             this.Body.setVelocity(obstacle, { x: 0, y: 0 });
             // 设置障碍物为静态
