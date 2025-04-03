@@ -61,6 +61,13 @@ export default {
         cooldown: 1000,   // 冷却时间(毫秒)
         lastReleaseTime: 0    // 上次释放时间
       },
+      // 可移动障碍物
+      movableObstacle: {
+        body: null,       // 障碍物物体引用
+        width: 400,       // 宽度
+        height: 10,       // 高度
+        offsetY: 0       // 底板下方偏移量
+      },
       // 缓存纹理
       _coinTextureCache: null
     }
@@ -176,12 +183,42 @@ export default {
         }
       });
       
-      // 保存底板引用和基准位置
+      // 创建可移动的障碍物
+      const movableObstacle = this.Bodies.rectangle(
+        this.collectionArea.x,
+        this.collectionArea.y + this.collectionArea.height + this.movableObstacle.offsetY,
+        this.movableObstacle.width,
+        this.movableObstacle.height,
+        {
+          isStatic: false,
+          density: 0.2,          // 较小的密度
+          friction: 1,           // 最大摩擦力
+          frictionStatic: 5,     // 极大的静态摩擦力，防止自由滑动
+          frictionAir: 0.5,      // 很大的空气阻力，使其快速停止
+          restitution: 0,        // 无弹性
+          render: {
+            fillStyle: '#2196F3', // 蓝色
+            visible: true
+          },
+          collisionFilter: {
+            category: 0x0002,
+            mask: 0xFFFFFFFF
+          },
+          // 自定义属性
+          plugin: {
+            isMovableObstacle: true // 标记为可移动障碍物
+          }
+        }
+      );
+      
+      // 保存底板和障碍物引用
       this.platformMotion.platform = platform;
       this.platformMotion.baseY = this.collectionArea.y + this.collectionArea.height;
+      this.movableObstacle.body = movableObstacle;
       
-      // 添加底板到墙体数组
+      // 添加底板和障碍物到墙体数组
       walls.push(platform);
+      walls.push(movableObstacle);
 
       // 添加边界到世界
       this.World.add(this.engine.world, walls);
@@ -199,6 +236,9 @@ export default {
           this.playCollisionSound();
         });
       });
+      
+      // 初始化重力补偿系统
+      this.initGravityCompensation();
       
       // 添加更新事件，用于移动底板
       this.Events.on(this.engine, 'beforeUpdate', () => {
@@ -493,13 +533,87 @@ export default {
       // 使用Matter.js的Body.setPosition方法
       const platform = this.platformMotion.platform;
       
-      // 计算位移量
-      const deltaY = newY - platform.position.y;
+      // 保存当前位置用于计算移动差值
+      const oldPlatformY = platform.position.y;
       
       // 使用Body.setPosition来移动底板
       this.Body.setPosition(platform, {
         x: platform.position.x,
         y: newY
+      });
+      
+      // 计算底板移动的距离
+      const deltaY = platform.position.y - oldPlatformY;
+      
+      // 检查障碍物是否需要移动
+      if (this.movableObstacle.body && deltaY > 0) { // 只有底板向下移动时才移动障碍物
+        const obstacle = this.movableObstacle.body;
+        
+        // 获取底板和障碍物的边界
+        const platformBounds = platform.bounds;
+        const obstacleBounds = obstacle.bounds;
+        
+        // 如果底板与障碍物在水平方向上有重叠
+        if (Math.abs(platform.position.x - obstacle.position.x) < (this.collectionArea.width / 2 + this.movableObstacle.width / 2) * 0.9) {
+          // 障碍物的正常位置应该在底板下方一点
+          const desiredDistanceFromPlatform = 1; // 5像素间隔
+          
+          // 计算碰撞情况
+          const platformBottom = platformBounds.max.y;
+          const obstacleTop = obstacleBounds.min.y - 10;
+          // 如果底板底部低于(或等于)障碍物顶部，表示它们碰撞或即将碰撞
+          if (platformBottom >= obstacleTop) {
+            console.log('障碍物与底板碰撞')
+            // 移动障碍物，使其与底板保持固定距离
+            const newObstacleY = platformBottom + desiredDistanceFromPlatform + (obstacle.bounds.max.y - obstacle.position.y);
+            
+            // 设置障碍物的新位置，与底板下移移动相同的距离
+            this.Body.setPosition(obstacle, {
+              x: obstacle.position.x,
+              y: newObstacleY
+            });
+
+            // 障碍物停止移动
+            this.Body.setVelocity(obstacle, { x: 0, y: 0 });
+            // 设置障碍物为静态
+            this.Body.setStatic(obstacle, true);
+            console.log('障碍物停止移动')
+          }
+        }
+      }
+      
+      // 不管是否与底板碰撞，都清除障碍物的重力影响和速度
+      if (this.movableObstacle.body) {
+        const obstacle = this.movableObstacle.body;
+        
+        // 逐渐减小速度，保持水平稳定性
+        // this.Body.setVelocity(obstacle, { 
+        //   x: obstacle.velocity.x * 0.8,
+        //   y: obstacle.velocity.y * 0.2  // 大幅减小垂直速度但不完全清零
+        // });
+        
+        // 清除作用在障碍物上的所有力
+        obstacle.force.x = 0;
+        obstacle.force.y = 0;
+      }
+    },
+    // 在 beforeUpdate 处理障碍物的重力抵消，确保它不会掉落
+    initGravityCompensation() {
+      this.Events.on(this.engine, 'beforeUpdate', () => {
+        if (this.movableObstacle.body) {
+          // 如果物体不是被底板推动中，则抵消重力
+          const obstacle = this.movableObstacle.body;
+          
+          // 根据Matter.js引擎的重力设置计算重力影响
+          const gravity = this.engine.gravity;
+          const gravityForce = {
+            x: -obstacle.mass * gravity.x * gravity.scale,
+            y: -obstacle.mass * gravity.y * gravity.scale
+          };
+          
+          // 应用抵消重力的力
+          this.Body.applyForce(obstacle, obstacle.position, gravityForce);
+        }
       });
     }
   },
