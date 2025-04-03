@@ -39,6 +39,12 @@ export default {
         y: 100,  // 中心y坐标 (从400减为100)
         width: 380, // 宽度
         height: 100 // 高度
+      },
+      // 掉落区域定义
+      dropArea: {
+        minX: 60,  // 左边界
+        maxX: 340, // 右边界
+        y: 30     // 掉落高度
       }
     }
   },
@@ -50,9 +56,15 @@ export default {
     InitPhysics() {
       console.log('初始化物理引擎')
       // 创建引擎
-      this.engine = this.Engine.create()
-      this.engine.gravity.y = 0.8 // 稍微减小重力以使金币掉落更加柔和
-
+      this.engine = this.Engine.create({
+        positionIterations: 8, // 增加位置迭代次数提高精度
+        velocityIterations: 6  // 增加速度迭代次数提高精度
+      })
+      
+      // 调整引擎重力
+      this.engine.gravity.y = 1.2 // 增加重力使金币掉落更快
+      this.engine.gravity.scale = 0.002 // 调整重力系数
+      
       // 创建渲染器
       this.render = this.Render.create({
         element: this.$refs.coinBox,
@@ -104,8 +116,10 @@ export default {
           isStatic: true, 
           render: { 
             fillStyle: '#999',
-            visible: false  // 改为可见以便调试
-          } 
+            visible: false
+          },
+          friction: 0.1, // 降低摩擦力
+          restitution: 0.9 // 增加弹性
         }),
         // 收集区域平台 - 右挡板
         this.Bodies.rectangle(this.collectionArea.x + this.collectionArea.width/2, 
@@ -114,18 +128,20 @@ export default {
           isStatic: true, 
           render: { 
             fillStyle: '#999',
-            visible: false  // 改为可见以便调试
-          } 
+            visible: false
+          },
+          friction: 0.1, // 降低摩擦力
+          restitution: 0.3 // 增加弹性
         }),
-        // 收集区域平台 - 底板
+        // 收集区域平台 - 底板 (保持原样，不改变倾斜度和其他属性)
         this.Bodies.rectangle(this.collectionArea.x, 
                              this.collectionArea.y + this.collectionArea.height, 
                              this.collectionArea.width, 20, { 
-          isStatic: true, 
+          isStatic: true,
           render: { 
             fillStyle: 'rgba(156, 39, 176, 0.5)',
-            visible: false
-          } 
+            visible: true
+          }
         })
       ]
 
@@ -148,6 +164,7 @@ export default {
       
       console.log('物理引擎初始化完成', {
         collectionArea: this.collectionArea,
+        dropArea: this.dropArea,
         engineCreated: !!this.engine,
         renderCreated: !!this.render
       })
@@ -163,31 +180,39 @@ export default {
       // 设置掉落金币的时间间隔
       const dropInterval = 150 // 毫秒
       
-      // 直接掉落一个测试金币
-      this.DropTestCoin()
-      
       const dropCoin = (index) => {
         if (index >= coinCount) return
         
         const value = coinValues[Math.floor(Math.random() * coinValues.length)]
         dropValue += value
         
-        // 固定位置 - 以确保金币能出现
+        // 随机位置 - 在掉落区域范围内随机X坐标
         const position = {
-          x: 200,  // 画布中心点
-          y: 50    // 画布顶部下方一点
+          x: this.getRandomInt(this.dropArea.minX, this.dropArea.maxX),
+          y: this.dropArea.y
         }
 
         // 随机旋转角度
         const angle = Math.random() * Math.PI * 2
         
+        // 随机初始速度 - 更大的随机范围
+        const velocity = {
+          x: (Math.random() - 0.5) * 5, // -2.5到2.5之间的随机值
+          y: Math.random() * 2 + 1     // 1到3之间的随机值
+        }
+
         // 创建带有金额的金币
         const coin = this.Bodies.circle(position.x, position.y, 15, {
           angle: angle,
-          restitution: 0.4, // 弹性系数
-          friction: 0.1, // 摩擦力
-          frictionAir: 0.001, // 空气摩擦力
-          density: 0.9, // 密度
+          restitution: 0.1, // 增加弹性系数，让金币更有弹跳
+          friction: 0.8,   // 减小摩擦力，让金币更容易滚动
+          frictionAir: 0.0005, // 减小空气摩擦力
+          frictionStatic: 0.2, // 减小静摩擦力
+          density: 1,    // 稍微减轻重量
+          chamfer: { radius: 2 }, // 轻微圆角化
+          mass: 10, // 增加重量
+          inertia: Infinity, // 设置较大的惯性值，防止旋转
+          inverseInertia: 0, // 设置为0，使金币不容易旋转
           render: {
             sprite: {
               texture: this.createCoinTexture(value),
@@ -199,8 +224,12 @@ export default {
           value: value // 存储金额值
         })
         
-        // 设置速度为固定向下
-        this.Body.setVelocity(coin, { x: 0, y: 2 })
+        // 设置初始速度
+        this.Body.setVelocity(coin, velocity)
+        
+        // 设置角速度 - 移除角速度以减少旋转
+        // this.Body.setAngularVelocity(coin, (Math.random() - 0.5) * 0.2)
+        this.Body.setAngularVelocity(coin, 0) // 设置为0，禁止初始旋转
         
         // 添加到世界
         this.World.add(this.engine.world, coin)
@@ -220,24 +249,11 @@ export default {
         this.totalValue += dropValue
       }, coinCount * dropInterval + 100)
     },
-    // 添加一个测试金币
-    DropTestCoin() {
-      // 创建一个固定位置的简单金币
-      const testCoin = this.Bodies.circle(200, 30, 20, {
-        restitution: 0.5,
-        friction: 0.1,
-        render: {
-          fillStyle: 'gold',
-          strokeStyle: 'orange',
-          lineWidth: 2
-        }
-      })
-      
-      // 添加到世界
-      this.World.add(this.engine.world, testCoin)
-      console.log('测试金币已添加', testCoin)
-      
-      return testCoin
+    // 获取范围内的随机整数
+    getRandomInt(min, max) {
+      min = Math.ceil(min)
+      max = Math.floor(max)
+      return Math.floor(Math.random() * (max - min + 1)) + min
     },
     // 创建金币纹理
     createCoinTexture(value) {
