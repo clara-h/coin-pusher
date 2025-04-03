@@ -51,9 +51,16 @@ export default {
       platformMotion: {
         platform: null,   // 底板对象引用
         baseY: 0,         // 基准Y位置
-        amplitude: 50,    // 上下移动幅度
-        frequency: 0.02, // 移动频率 - 从0.001增加到0.005，提高移动速度
+        amplitude: 60,    // 上下移动幅度
+        frequency: 0.02,  // 移动频率
         time: 0           // 计时器
+      },
+      // 压力感应系统
+      pressureSystem: {
+        threshold: 30,     // 触发穿透的金币数量阈值
+        maxCoinsToRelease: 5, // 一次最多释放几个金币
+        cooldown: 1000,   // 冷却时间(毫秒)
+        lastReleaseTime: 0    // 上次释放时间
       }
     }
   },
@@ -162,7 +169,7 @@ export default {
                           this.collectionArea.y + this.collectionArea.height, 
                           this.collectionArea.width, 20, { 
         isStatic: true,
-        render: { 
+        render: {
           fillStyle: 'rgba(156, 39, 176, 0.5)',
           visible: true
         }
@@ -195,6 +202,8 @@ export default {
       // 添加更新事件，用于移动底板
       this.Events.on(this.engine, 'beforeUpdate', () => {
         this.updatePlatformPosition();
+        this.checkCoinsOutOfBounds();
+        this.checkPressureSystem();
       });
     },
     DropCoins() {
@@ -336,6 +345,113 @@ export default {
       // 这里可以实现实际的音效播放逻辑
       // console.log('播放金币掉落音效')
     },
+    // 检查压力系统
+    checkPressureSystem() {
+      // 如果在冷却期，则跳过
+      const now = Date.now();
+      if (now - this.pressureSystem.lastReleaseTime < this.pressureSystem.cooldown) {
+        return;
+      }
+      
+      // 检查是否有金币触碰到顶部障碍物
+      const topObstacleY = this.dropArea.y + 10; // 障碍物位置加上半高
+      const coinsNearTopObstacle = this.coins.filter(coin => 
+        Math.abs(coin.position.y - topObstacleY) < 30 && // 接近顶部障碍物
+        Math.abs(coin.velocity.y) < 0.5 // 速度很小，表示已经停止或堆积
+      );
+      
+      // 如果有金币接触顶部障碍物，检查底板上的金币堆积情况
+      if (coinsNearTopObstacle.length > 0) {
+        console.log("检测到金币触碰顶部障碍物");
+        
+        // 获取底板上方的金币
+        const platform = this.platformMotion.platform;
+        const coinsAbovePlatform = this.coins.filter(coin => 
+          Math.abs(coin.position.x - platform.position.x) < this.collectionArea.width/2 && // 在底板上方
+          Math.abs(coin.position.y - platform.position.y) < 80 && // 靠近底板
+          coin.position.y < platform.position.y // 在底板上方
+        );
+        
+        // 如果底板上的金币数量超过阈值，执行压力释放
+        if (coinsAbovePlatform.length >= this.pressureSystem.threshold) {
+          console.log(`底板上有${coinsAbovePlatform.length}个金币，超过阈值${this.pressureSystem.threshold}`);
+          
+          // 找出底板上最底层的金币（受压最大的）
+          const bottomLayerCoins = coinsAbovePlatform
+            .sort((a, b) => b.position.y - a.position.y) // 按Y坐标降序排序
+            .slice(0, Math.min(this.pressureSystem.maxCoinsToRelease, coinsAbovePlatform.length)); // 取前N个
+          
+          // 让这些金币穿透底板
+          bottomLayerCoins.forEach(coin => {
+            // 临时修改金币的碰撞组，使其可以穿透底板
+            const originalCollisionFilter = {...coin.collisionFilter};
+            
+            // 设置为不与底板碰撞
+            coin.collisionFilter.group = -1;
+            coin.collisionFilter.mask = 0xFFFFFF;
+            
+            // 给金币一个向下的力，帮助其穿透
+            this.Body.applyForce(coin, coin.position, {
+              x: 0,
+              y: 0.05
+            });
+            
+            // 改变金币颜色，使其闪烁效果
+            const originalRender = coin.render.sprite;
+            
+            // 创建闪烁效果
+            let flashCount = 0;
+            const flashInterval = setInterval(() => {
+              if (flashCount > 4) {
+                clearInterval(flashInterval);
+                // 恢复原始碰撞组，但此时已经穿过底板
+                setTimeout(() => {
+                  coin.collisionFilter = originalCollisionFilter;
+                }, 500);
+                return;
+              }
+              
+              // 交替闪烁
+              coin.render.fillStyle = flashCount % 2 === 0 ? '#FF5722' : '#FFC107';
+              flashCount++;
+            }, 100);
+          });
+          
+          // 更新最后释放时间
+          this.pressureSystem.lastReleaseTime = now;
+          
+          console.log(`释放了${bottomLayerCoins.length}个金币通过底板`);
+        }
+      }
+    },
+    // 检查金币是否超出边界
+    checkCoinsOutOfBounds() {
+      // 获取所有金币，简单检查是否在coins数组中
+      const allCoins = this.coins.slice(); // 创建数组副本
+      console.log('allCoins', allCoins)
+      // 检查每个金币
+      for (let i = allCoins.length - 1; i >= 0; i--) {
+        const coin = allCoins[i];
+        // 如果金币超出下边界或穿过底板
+        if (coin.position.y > 650 || 
+            (coin.position.y > this.collectionArea.y + this.collectionArea.height + 100 && 
+             Math.abs(coin.velocity.y) > 2)) {
+          
+          // 从世界和数组中移除金币
+          this.World.remove(this.engine.world, coin);
+          
+          // 记录金额
+          if (coin.value) {
+            this.totalValue += coin.value;
+          }
+          
+          // 从数组中移除
+          this.coins.splice(this.coins.indexOf(coin), 1);
+          
+          console.log(`金币掉落界外，已移除并计分: ${coin.value}元`);
+        }
+      }
+    },
     // 更新底板位置的方法
     updatePlatformPosition() {
       if (!this.platformMotion.platform) return;
@@ -348,24 +464,17 @@ export default {
                   Math.sin(this.platformMotion.time * this.platformMotion.frequency) * 
                   this.platformMotion.amplitude;
       
-      // 不使用Matter.js的Body.setPosition方法，直接设置位置属性
-      // 这样可以避免物理引擎对位置变化的插值计算，确保移动速度恒定
+      // 使用Matter.js的Body.setPosition方法
       const platform = this.platformMotion.platform;
       
-      // 保存当前位置的差值
+      // 计算位移量
       const deltaY = newY - platform.position.y;
       
-      // 直接更新位置
-      platform.position.y = newY;
-      platform.positionPrev.y = newY - deltaY; // 更新上一帧位置，保持速度一致
-      
-      // 强制更新所有顶点位置
-      for (let i = 0; i < platform.vertices.length; i++) {
-        platform.vertices[i].y += deltaY;
-      }
-      
-      // 更新边界
-      this.Bounds.update(platform.bounds, platform.vertices, platform.velocity);
+      // 使用Body.setPosition来移动底板
+      this.Body.setPosition(platform, {
+        x: platform.position.x,
+        y: newY
+      });
     }
   },
   beforeDestroy() {
