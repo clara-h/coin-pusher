@@ -50,8 +50,8 @@ export default {
       platformMotion: {
         platform: null,   // 底板对象引用
         baseY: 0,         // 基准Y位置
-        amplitude: 60,    // 上下移动幅度
-        frequency: 0.02,  // 移动频率
+        amplitude: 30,    // 上下移动幅度，减小为固定值
+        frequency: 0.015,  // 移动频率，设置为固定值
         time: 0           // 计时器
       },
       // 压力感应系统
@@ -61,12 +61,12 @@ export default {
         cooldown: 1000,   // 冷却时间(毫秒)
         lastReleaseTime: 0    // 上次释放时间
       },
-      // 可移动障碍物
+      // 底部高摩擦力条
       movableObstacle: {
         body: null,       // 障碍物物体引用
         width: 400,       // 宽度
-        height: 10,       // 高度
-        offsetY: 0       // 底板下方偏移量
+        height: 20,       // 增加高度使其更明显
+        offsetY: 0       // 不再使用此偏移量，因为位置是固定的
       },
       // 缓存纹理
       _coinTextureCache: null
@@ -158,46 +158,39 @@ export default {
         //   friction: 0.1, // 降低摩擦力
         //   restitution: 0.9 // 增加弹性
         // }),
-        // 掉落区域上方的长条障碍物
+        // 掉落区域上方的长条障碍物 - 现在作为可移动底板
         this.Bodies.rectangle(200, this.dropArea.y, 400, 10, { 
           isStatic: true, 
           // angle: Math.PI * 0.03, // 略微倾斜，增加趣味性
           chamfer: { radius: 2 }, // 轻微圆角
           render: { 
-            fillStyle: '#f44336',
+            fillStyle: 'rgba(156, 39, 176, 0.8)', // 使用原底板的颜色但更明显
             visible: true
           },
           friction: 0.1, // 较小的摩擦力
-          restitution: 0.5 // 中等弹性
+          restitution: 0.5, // 中等弹性
+          plugin: {
+            isMovablePlatform: true // 标记为可移动平台
+          }
         })
       ];
 
-      // 创建收集区域底板 - 可上下移动
-      const platform = this.Bodies.rectangle(this.collectionArea.x, 
-                          this.collectionArea.y + this.collectionArea.height, 
-                          this.collectionArea.width, 20, { 
-        isStatic: true,
-        render: {
-          fillStyle: 'rgba(156, 39, 176, 0.5)',
-          visible: true
-        }
-      });
+      // 顶部障碍物将作为可移动底板，不再需要单独创建收集区域底板
       
-      // 创建可移动的障碍物
+      // 创建固定在底部的高摩擦力条
       const movableObstacle = this.Bodies.rectangle(
-        this.collectionArea.x,
-        this.collectionArea.y + this.collectionArea.height + this.movableObstacle.offsetY,
+        200, // 中心x坐标
+        500, // 底部位置，接近游戏区域底部
         this.movableObstacle.width,
         this.movableObstacle.height,
         {
-          isStatic: false,
-          density: 0.2,          // 较小的密度
-          friction: 1,           // 最大摩擦力
-          frictionStatic: 5,     // 极大的静态摩擦力，防止自由滑动
-          frictionAir: 0.5,      // 很大的空气阻力，使其快速停止
+          isStatic: true,        // 设为静态，不可移动
+          friction: 2,           // 增加最大摩擦力
+          frictionStatic: 10,    // 极大的静态摩擦力
+          frictionAir: 1,        // 最大空气摩擦力
           restitution: 0,        // 无弹性
           render: {
-            fillStyle: '#2196F3', // 蓝色
+            fillStyle: '#FF5722', // 橙红色，更醒目
             visible: true
           },
           collisionFilter: {
@@ -206,19 +199,39 @@ export default {
           },
           // 自定义属性
           plugin: {
-            isMovableObstacle: true // 标记为可移动障碍物
+            isMovableObstacle: true // 保留标记
           }
         }
       );
       
-      // 保存底板和障碍物引用
-      this.platformMotion.platform = platform;
-      this.platformMotion.baseY = this.collectionArea.y + this.collectionArea.height;
+      // 创建从movableObstacle到顶部障碍物之间的高摩擦力区域
+      const frictionZone = this.Bodies.rectangle(
+        200, // 中心x坐标
+        (500 + this.dropArea.y) / 2, // 中心y坐标 (movableObstacle和顶部障碍物的中点)
+        400, // 宽度，覆盖整个游戏区域宽度
+        500 - this.dropArea.y, // 高度，从顶部障碍物到movableObstacle的距离
+        {
+          isStatic: true,        // 设为静态，不可移动
+          isSensor: true,        // 设为传感器，不会产生物理碰撞
+          render: {
+            fillStyle: 'rgba(255, 255, 0, 0.1)', // 半透明黄色，便于调试
+            visible: false       // 设为不可见
+          },
+          // 自定义属性
+          plugin: {
+            isFrictionZone: true  // 标记为摩擦区域
+          }
+        }
+      );
+      
+      // 保存顶部障碍物作为可移动底板的引用
+      this.platformMotion.platform = walls.find(wall => wall.plugin?.isMovablePlatform);
+      this.platformMotion.baseY = this.dropArea.y; // 更新基准Y位置为顶部障碍物位置
       this.movableObstacle.body = movableObstacle;
       
-      // 添加底板和障碍物到墙体数组
-      walls.push(platform);
+      // 添加障碍物和摩擦区域到墙体数组
       walls.push(movableObstacle);
+      walls.push(frictionZone); // 添加高摩擦力区域到墙体数组
 
       // 添加边界到世界
       this.World.add(this.engine.world, walls);
@@ -234,11 +247,73 @@ export default {
       this.Events.on(this.engine, 'collisionStart', (event) => {
         event.pairs.forEach((pair) => {
           this.playCollisionSound();
+          
+          // 检查是否有金币参与碰撞
+          const coinA = pair.bodyA.value !== undefined ? pair.bodyA : null;
+          const coinB = pair.bodyB.value !== undefined ? pair.bodyB : null;
+          
+          // 处理金币碰撞后的物理特性
+          [coinA, coinB].forEach(coin => {
+            if (coin && !coin.plugin?.noGravity) {
+              // 标记金币已经被处理过
+              coin.plugin = coin.plugin || {};
+              coin.plugin.noGravity = true;
+              
+              // 增加摩擦力，移除重力影响
+              this.Body.setStatic(coin, false); // 确保不是静态的
+              this.Body.set(coin, {
+                friction: 0.95,       // 增加摩擦力
+                frictionAir: 0.2,     // 增加空气摩擦力
+                frictionStatic: 0.9,  // 增加静摩擦力
+                restitution: 0.01     // 降低弹性
+              });
+            }
+          });
         });
       });
       
-      // 初始化重力补偿系统
-      this.initGravityCompensation();
+      // 添加碰撞后事件，用于处理金币的重力
+      this.Events.on(this.engine, 'afterUpdate', () => {
+        // 获取高摩擦力区域的位置信息
+        const frictionZone = walls.find(wall => wall.plugin?.isFrictionZone);
+        const topObstacleY = this.dropArea.y + 5; // 顶部障碍物位置
+        const bottomObstacleY = 500; // movableObstacle位置
+        
+        // 处理所有金币
+        this.coins.forEach(coin => {
+          // 检查金币是否在高摩擦力区域内
+          const isInFrictionZone = 
+            coin.position.y > topObstacleY && 
+            coin.position.y < bottomObstacleY;
+          
+          // 如果金币在高摩擦力区域内或已被标记为无重力
+          if (isInFrictionZone || coin.plugin?.noGravity) {
+            // 确保金币有plugin对象
+            coin.plugin = coin.plugin || {};
+            
+            // 标记金币为无重力状态
+            coin.plugin.noGravity = true;
+            
+            // 增加摩擦力，使金币更容易停止
+            this.Body.set(coin, {
+              friction: 0.95,       // 增加摩擦力
+              frictionAir: 0.2,     // 增加空气摩擦力
+              frictionStatic: 0.9,  // 增加静摩擦力
+              restitution: 0.01     // 降低弹性
+            });
+            
+            // 抵消重力影响
+            const gravity = this.engine.gravity;
+            const gravityForce = {
+              x: -coin.mass * gravity.x * gravity.scale,
+              y: -coin.mass * gravity.y * gravity.scale
+            };
+            
+            // 应用抵消重力的力
+            this.Body.applyForce(coin, coin.position, gravityForce);
+          }
+        });
+      });
       
       // 添加更新事件，用于移动底板
       this.Events.on(this.engine, 'beforeUpdate', () => {
@@ -289,13 +364,13 @@ export default {
         // 创建带有金额的金币
         const coin = this.Bodies.circle(position.x, position.y, 15, {
           angle: angle,
-          restitution: 0.1, // 增加弹性系数，让金币更有弹跳
-          friction: 0.8,   // 减小摩擦力，让金币更容易滚动
-          frictionAir: 0.0005, // 减小空气摩擦力
-          frictionStatic: 0.2, // 减小静摩擦力
-          density: 1,    // 稍微减轻重量
+          restitution: 0.05, // 降低弹性系数，减少弹跳
+          friction: 0.9,   // 增加摩擦力，让金币更容易停止
+          frictionAir: 0.001, // 增加空气摩擦力
+          frictionStatic: 0.5, // 增加静摩擦力
+          density: 1,    // 保持重量
           chamfer: { radius: 2 }, // 轻微圆角化
-          mass: 0.1, // 增加重量
+          mass: 0.1, // 保持重量
           inertia: Infinity, // 设置较大的惯性值，防止旋转
           inverseInertia: 0, // 设置为0，使金币不容易旋转
           render: {
@@ -306,7 +381,11 @@ export default {
             }
           },
           slop: 0.05, // 允许物体轻微重叠
-          value: value // 存储金额值
+          value: value, // 存储金额值
+          plugin: {
+            // 初始不设置noGravity标记，让金币先正常掉落
+            // 碰撞后会设置此标记
+          }
         })
         
         // 设置初始速度
@@ -420,52 +499,52 @@ export default {
         return;
       }
       
-      // 检查是否有金币触碰到顶部障碍物
-      const topObstacleY = this.dropArea.y + 10; // 障碍物位置加上半高
+      // 检查是否有金币堆积在游戏区域中部
+      const middleY = 300; // 游戏区域中部位置
       // 只检查部分金币而不是全部
       const sampleCoins = this.coins.slice(0, Math.min(this.coins.length, 20));
-      const coinsNearTopObstacle = sampleCoins.filter(coin => 
-        Math.abs(coin.position.y - topObstacleY) < 30 && // 接近顶部障碍物
+      const coinsInMiddle = sampleCoins.filter(coin => 
+        Math.abs(coin.position.y - middleY) < 50 && // 在游戏区域中部
         Math.abs(coin.velocity.y) < 0.5 // 速度很小，表示已经停止或堆积
       );
       
-      // 如果有金币接触顶部障碍物，检查底板上的金币堆积情况
-      if (coinsNearTopObstacle.length > 0) {
-        // 获取底板上方的金币 - 使用采样而不是检查全部金币
-        const platform = this.platformMotion.platform;
+      // 如果有金币堆积在中部，检查底部障碍物上的金币堆积情况
+      if (coinsInMiddle.length > 0) {
+        // 获取底部障碍物上方的金币 - 使用采样而不是检查全部金币
+        const obstacle = this.movableObstacle.body;
         const coinsSample = this.coins.filter((_, index) => index % 3 === 0); // 只取三分之一的金币
-        const coinsAbovePlatform = coinsSample.filter(coin => 
-          Math.abs(coin.position.x - platform.position.x) < this.collectionArea.width/2 && // 在底板上方
-          Math.abs(coin.position.y - platform.position.y) < 80 && // 靠近底板
-          coin.position.y < platform.position.y // 在底板上方
+        const coinsAboveObstacle = coinsSample.filter(coin => 
+          Math.abs(coin.position.x - obstacle.position.x) < this.movableObstacle.width/2 && // 在障碍物上方
+          Math.abs(coin.position.y - obstacle.position.y) < 80 && // 靠近障碍物
+          coin.position.y < obstacle.position.y // 在障碍物上方
         );
         
         // 根据采样估算总数
-        const estimatedTotal = coinsAbovePlatform.length * 3;
+        const estimatedTotal = coinsAboveObstacle.length * 3;
         
-        // 如果估计底板上的金币数量超过阈值，执行压力释放
+        // 如果估计障碍物上的金币数量超过阈值，执行压力释放
         if (estimatedTotal >= this.pressureSystem.threshold) {
-          // 找出底板上最底层的金币（受压最大的）
+          // 找出障碍物上最底层的金币（受压最大的）
           // 直接从coins数组中找最下面的几个，而不是排序全部
           const bottomCoins = this.coins.filter(coin => 
-            Math.abs(coin.position.x - platform.position.x) < this.collectionArea.width/2 &&
-            platform.position.y - coin.position.y < 30 && // 只找最靠近底板的
-            coin.position.y < platform.position.y
+            Math.abs(coin.position.x - obstacle.position.x) < this.movableObstacle.width/2 &&
+            obstacle.position.y - coin.position.y < 30 && // 只找最靠近障碍物的
+            coin.position.y < obstacle.position.y
           );
           
           const bottomLayerCoins = bottomCoins
             .slice(0, Math.min(this.pressureSystem.maxCoinsToRelease, bottomCoins.length));
           
-          // 让这些金币穿透底板
+          // 让这些金币穿透障碍物
           bottomLayerCoins.forEach(coin => {
-            // 临时修改金币的碰撞组，使其可以穿透底板
+            // 临时修改金币的碰撞组，使其可以穿透障碍物
             const originalCollisionFilter = {...coin.collisionFilter};
             
             // 特别标记这个金币，防止它被checkCoinsOutOfBounds方法清除
             coin.plugin = coin.plugin || {};
             coin.plugin.isPenetrating = true;
             
-            // 设置为不与底板碰撞
+            // 设置为不与障碍物碰撞
             coin.collisionFilter.group = -1;
             coin.collisionFilter.mask = 0xFFFFFF;
             
@@ -478,7 +557,7 @@ export default {
             // 简化闪烁效果，减少定时器使用
             coin.render.fillStyle = '#FF5722';
             
-            // 恢复原始碰撞组，但此时已经穿过底板
+            // 恢复原始碰撞组，但此时已经穿过障碍物
             setTimeout(() => {
               coin.collisionFilter = originalCollisionFilter;
               coin.render.fillStyle = undefined; // 恢复原始颜色
@@ -520,15 +599,25 @@ export default {
         const obstacle = this.movableObstacle.body;
         const obstacleTop = obstacle ? obstacle.bounds.min.y : 600;
         
+        // 获取顶部可移动底板的位置信息
+        const topPlatform = this.platformMotion.platform;
+        const topPlatformBottom = topPlatform ? topPlatform.bounds.max.y : this.dropArea.y + 5;
+        
         // 只有当金币完全超出游戏区域或明显超出底部才移除
         // 如果金币在障碍物上方，不要移除它
         const isCoinAboveObstacle = obstacle && 
                                   Math.abs(coin.position.x - obstacle.position.x) < this.movableObstacle.width/2 && 
                                   coin.position.y < obstacleTop + 30;
         
+        // 检查金币是否在顶部底板下方
+        const isCoinBelowTopPlatform = topPlatform && 
+                                     Math.abs(coin.position.x - topPlatform.position.x) < 200 && 
+                                     coin.position.y > topPlatformBottom - 5;
+        
         // 只有当金币超出下边界且不在障碍物上方时才移除
         if ((coin.position.y > 650 && !isCoinAboveObstacle) || 
-            (coin.position.y > 800)) { // 彻底超出界限的情况
+            (coin.position.y > 800) || // 彻底超出界限的情况
+            (coin.position.y < 0)) { // 超出上边界的情况
           
           // 从世界和数组中移除金币
           this.World.remove(this.engine.world, coin);
@@ -543,111 +632,27 @@ export default {
         }
       }
     },
-    // 更新底板位置的方法
+    // 更新顶部障碍物位置的方法
     updatePlatformPosition() {
       if (!this.platformMotion.platform) return;
       
       // 更新时间 - 使用固定时间增量，不受帧率影响
       this.platformMotion.time += 1;
       
-      // 计算新的Y位置 - 正弦波形运动
+      // 计算新的Y位置 - 正弦波形运动，固定幅度和频率
       const newY = this.platformMotion.baseY + 
                   Math.sin(this.platformMotion.time * this.platformMotion.frequency) * 
-                  this.platformMotion.amplitude;
+                  this.platformMotion.amplitude; // 使用固定幅度
       
       // 使用Matter.js的Body.setPosition方法
       const platform = this.platformMotion.platform;
-      
-      // 保存当前位置用于计算移动差值
-      const oldPlatformY = platform.position.y;
       
       // 使用Body.setPosition来移动底板
       this.Body.setPosition(platform, {
         x: platform.position.x,
         y: newY
       });
-      
-      // 计算底板移动的距离
-      const deltaY = platform.position.y - oldPlatformY;
-      
-      // 检查障碍物是否需要移动
-      if (this.movableObstacle.body && deltaY > 0) { // 只有底板向下移动时才移动障碍物
-        const obstacle = this.movableObstacle.body;
-        
-        // 获取底板和障碍物的边界
-        const platformBounds = platform.bounds;
-        const obstacleBounds = obstacle.bounds;
-        
-        // 如果底板与障碍物在水平方向上有重叠
-        if (Math.abs(platform.position.x - obstacle.position.x) < (this.collectionArea.width / 2 + this.movableObstacle.width / 2) * 0.9) {
-          // 障碍物的正常位置应该在底板下方一点
-          const desiredDistanceFromPlatform = 1; // 5像素间隔
-          
-          // 计算碰撞情况
-          const platformBottom = platformBounds.max.y;
-          const obstacleTop = obstacleBounds.min.y - 10;
-          
-          // 如果底板底部低于(或等于)障碍物顶部，表示它们碰撞或即将碰撞
-          if (platformBottom >= obstacleTop) {
-            console.log('障碍物与底板碰撞')
-            
-            // 如果障碍物是静态的，先切换为非静态以便能移动
-            if (obstacle.isStatic) {
-              this.Body.setStatic(obstacle, false);
-            }
-            
-            // 移动障碍物，使其与底板保持固定距离
-            const newObstacleY = platformBottom + desiredDistanceFromPlatform + (obstacle.bounds.max.y - obstacle.position.y);
-            
-            // 设置障碍物的新位置，与底板下移移动相同的距离
-            this.Body.setPosition(obstacle, {
-              x: obstacle.position.x,
-              y: newObstacleY
-            });
-            
-            // 障碍物停止移动
-            this.Body.setVelocity(obstacle, { x: 0, y: 0 });
-            // 设置障碍物为静态
-            this.Body.setStatic(obstacle, true);
-            console.log('障碍物停止移动')
-          }
-        }
-      }
-      
-      // 不管是否与底板碰撞，都清除障碍物的重力影响和速度
-      if (this.movableObstacle.body) {
-        const obstacle = this.movableObstacle.body;
-        
-        // 逐渐减小速度，保持水平稳定性
-        // this.Body.setVelocity(obstacle, { 
-        //   x: obstacle.velocity.x * 0.8,
-        //   y: obstacle.velocity.y * 0.2  // 大幅减小垂直速度但不完全清零
-        // });
-        
-        // 清除作用在障碍物上的所有力
-        obstacle.force.x = 0;
-        obstacle.force.y = 0;
-      }
     },
-    // 在 beforeUpdate 处理障碍物的重力抵消，确保它不会掉落
-    initGravityCompensation() {
-      this.Events.on(this.engine, 'beforeUpdate', () => {
-        if (this.movableObstacle.body) {
-          // 如果物体不是被底板推动中，则抵消重力
-          const obstacle = this.movableObstacle.body;
-          
-          // 根据Matter.js引擎的重力设置计算重力影响
-          const gravity = this.engine.gravity;
-          const gravityForce = {
-            x: -obstacle.mass * gravity.x * gravity.scale,
-            y: -obstacle.mass * gravity.y * gravity.scale
-          };
-          
-          // 应用抵消重力的力
-          this.Body.applyForce(obstacle, obstacle.position, gravityForce);
-        }
-      });
-    }
   },
   beforeDestroy() {
     // 清理资源
