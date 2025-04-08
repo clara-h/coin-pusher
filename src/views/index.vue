@@ -255,209 +255,185 @@ export default {
       
       // 添加碰撞事件
       this.Events.on(this.engine, 'collisionStart', (event) => {
+        // 处理所有碰撞对
         event.pairs.forEach((pair) => {
-          this.playCollisionSound();
+          // 检查碰撞对象是否是金币和动态平台
+          const isMovablePlatform = pair.bodyA === this.platformMotion.platform || 
+                                    pair.bodyB === this.platformMotion.platform;
           
-          // 检查是否是顶部平台与金币的碰撞
-          const isPlatform = pair.bodyA.plugin?.isMovablePlatform || pair.bodyB.plugin?.isMovablePlatform;
-          const coinBody = pair.bodyA.value !== undefined ? pair.bodyA : 
-                          pair.bodyB.value !== undefined ? pair.bodyB : null;
-          const platformBody = pair.bodyA.plugin?.isMovablePlatform ? pair.bodyA : 
-                              pair.bodyB.plugin?.isMovablePlatform ? pair.bodyB : null;
+          const coinBody = pair.bodyA.plugin?.isCoin ? pair.bodyA : 
+                          (pair.bodyB.plugin?.isCoin ? pair.bodyB : null);
           
-          // 如果是平台和金币碰撞，特殊处理
-          if (isPlatform && coinBody) {
-            coinBody.plugin = coinBody.plugin || {};
+          if (isMovablePlatform && coinBody) {
+            // 初始化金币的plugin对象（如果不存在）
+            if (!coinBody.plugin) {
+              coinBody.plugin = {};
+            }
+            
+            // 获取平台对象
+            const platformBody = pair.bodyA === this.platformMotion.platform ? 
+                                 pair.bodyA : pair.bodyB;
+            
+            // 标记金币正在接触平台
             coinBody.plugin.touchingPlatform = true;
-            coinBody.plugin.touchingPlatformTime = Date.now(); // 记录碰撞时间戳
+            coinBody.plugin.platformId = platformBody.id;
             
-            // 调整金币参数使其更容易被推动
-            this.Body.setStatic(coinBody, false);
-            this.Body.set(coinBody, {
-              friction: 0.5,         // 更低的摩擦力，使金币更容易被推动
-              frictionAir: 0.1,      // 更低的空气摩擦力
-              frictionStatic: 0.2,   // 更低的静摩擦力
-              restitution: 0.2,      // 增加更多弹性
-              density: 0.03          // 更轻的密度，使金币更容易被推动
-            });
-            
-            // 计算碰撞方向和速度
-            if (platformBody) {
-              const platformVelocity = platformBody.velocity;
-              const platformPosition = platformBody.position;
-              const coinPosition = coinBody.position;
+            // 特殊处理：在平台向上移动时，设置强粘附效果
+            if (platformBody.customData && platformBody.customData.direction < 0) {
+              coinBody.plugin.stuckToPlatform = true;
               
-              // 计算金币相对于平台的位置（上/下）
-              const isAbovePlatform = coinPosition.y < platformPosition.y;
-              
-              // 计算推力方向，根据平台的移动方向和金币相对位置
-              let forceY = 0;
-              
-              if (isAbovePlatform && platformVelocity.y < 0) {
-                // 平台向上移动且金币在上方 - 向上推
-                forceY = platformVelocity.y * 0.001;
-              } else if (!isAbovePlatform && platformVelocity.y > 0) {
-                // 平台向下移动且金币在下方 - 向下推
-                forceY = platformVelocity.y * 0.001;
-              } else {
-                // 其他情况 - 根据碰撞法线施加推力
-                const normalVector = pair.collision ? pair.collision.normal : { x: 0, y: isAbovePlatform ? -1 : 1 };
-                forceY = platformVelocity.y * 0.001 * normalVector.y;
-              }
-              
-              // 根据平台移动方向给金币施加力
-              this.Body.applyForce(coinBody, coinBody.position, {
-                x: 0,
-                y: forceY
+              // 降低金币的密度和空气摩擦力，使其更容易跟随平台
+              this.Body.set(coinBody, {
+                density: 0.001,    // 非常轻
+                frictionAir: 0.001 // 几乎没有空气阻力
               });
-              
-              // 记录平台速度以便在update中持续应用
-              coinBody.plugin.platformVelocityY = platformVelocity.y;
             }
-          } else {
-            // 检查是否有金币参与碰撞
-            const coinA = pair.bodyA.value !== undefined ? pair.bodyA : null;
-            const coinB = pair.bodyB.value !== undefined ? pair.bodyB : null;
-            
-            // 处理金币碰撞后的物理特性
-            [coinA, coinB].forEach(coin => {
-              if (coin) {
-                // 标记金币已经被处理过
-                coin.plugin = coin.plugin || {};
-                
-                // 设置巨大摩擦力，确保金币只能被碰撞和推动
-                this.Body.setStatic(coin, false); // 确保不是静态的
-                this.Body.set(coin, {
-                  friction: 1.5,        // 极大的摩擦力
-                  frictionAir: 0.5,     // 极大的空气摩擦力
-                  frictionStatic: 1.5,  // 极大的静摩擦力
-                  restitution: 0.01,    // 几乎没有弹性
-                  density: 0.1         // 降低密度，使其更容易被推动
-                });
-              }
-            });
           }
         });
       });
       
-      // 在活跃碰撞期间持续应用力
+      // 处理持续碰撞事件 - 持续应用力使金币跟随平台
       this.Events.on(this.engine, 'collisionActive', (event) => {
+        // 处理所有碰撞对
         event.pairs.forEach((pair) => {
-          // 检查是否是顶部平台与金币的碰撞
-          const isPlatform = pair.bodyA.plugin?.isMovablePlatform || pair.bodyB.plugin?.isMovablePlatform;
-          const coinBody = pair.bodyA.value !== undefined ? pair.bodyA : 
-                          pair.bodyB.value !== undefined ? pair.bodyB : null;
-          const platformBody = pair.bodyA.plugin?.isMovablePlatform ? pair.bodyA : 
-                              pair.bodyB.plugin?.isMovablePlatform ? pair.bodyB : null;
+          // 检查碰撞对象是否是金币和动态平台
+          const isMovablePlatform = pair.bodyA === this.platformMotion.platform || 
+                                    pair.bodyB === this.platformMotion.platform;
           
-          // 如果是平台和金币碰撞，继续应用力
-          if (isPlatform && coinBody && platformBody && platformBody.customData) {
-            // 获取平台方向和速度
-            const direction = platformBody.customData.direction;
-            const speed = platformBody.customData.speed;
-            
-            // 计算金币相对于平台的位置
-            const isAbovePlatform = coinBody.position.y < platformBody.position.y;
-            
-            // 应用持续的力，使金币随平台移动
-            // 根据相对位置调整力
-            const positionFactor = isAbovePlatform ? 
-                                  (direction < 0 ? 1.5 : 0.5) : 
-                                  (direction > 0 ? 1.5 : 0.5);
-            
-            // 应用力
-            this.Body.applyForce(coinBody, coinBody.position, {
-              x: 0,
-              y: direction * speed * 0.0005 * positionFactor
-            });
-            
-            // 如果金币和平台非常接近，直接调整位置确保紧密跟随
-            const distY = Math.abs(
-              isAbovePlatform ? 
-              platformBody.bounds.min.y - coinBody.bounds.max.y : 
-              coinBody.bounds.min.y - platformBody.bounds.max.y
-            );
-            
-            if (distY < 2) {
-              // 直接调整位置，确保金币紧密跟随平台
-              this.Body.setPosition(coinBody, {
-                x: coinBody.position.x,
-                y: coinBody.position.y + direction * speed * 0.8
-              });
-              
-              // 同步速度
-              this.Body.setVelocity(coinBody, {
-                x: coinBody.velocity.x,
-                y: direction * speed * 0.9
-              });
-            }
-          }
-        });
-      });
-      
-      // 添加碰撞结束事件，处理金币离开平台的情况
-      this.Events.on(this.engine, 'collisionEnd', (event) => {
-        event.pairs.forEach((pair) => {
-          // 检查是否是顶部平台与金币的碰撞结束
-          const isPlatform = pair.bodyA.plugin?.isMovablePlatform || pair.bodyB.plugin?.isMovablePlatform;
-          const coinBody = pair.bodyA.value !== undefined ? pair.bodyA : 
-                          pair.bodyB.value !== undefined ? pair.bodyB : null;
-          const platformBody = pair.bodyA.plugin?.isMovablePlatform ? pair.bodyA : 
-                              pair.bodyB.plugin?.isMovablePlatform ? pair.bodyB : null;
+          const coinBody = pair.bodyA.plugin?.isCoin ? pair.bodyA : 
+                          (pair.bodyB.plugin?.isCoin ? pair.bodyB : null);
           
-          // 如果是平台和金币碰撞结束
-          if (isPlatform && coinBody && coinBody.plugin) {
-            // 如果金币确实与平台接触过，标记为刚离开平台
-            if (coinBody.plugin.touchingPlatform) {
-              coinBody.plugin.justLeftPlatform = true;
-              coinBody.plugin.touchingPlatform = false;
-              coinBody.plugin.leftPlatformTime = Date.now();
+          if (isMovablePlatform && coinBody) {
+            // 获取平台对象
+            const platformBody = pair.bodyA === this.platformMotion.platform ? 
+                                pair.bodyA : pair.bodyB;
+            
+            if (platformBody.customData) {
+              // 获取平台的移动方向和速度
+              const direction = platformBody.customData.direction;
+              const speed = platformBody.customData.speed;
               
-              // 保留平台速度的一部分影响，使过渡更平滑
-              if (platformBody && platformBody.customData) {
-                const direction = platformBody.customData.direction;
-                const speed = platformBody.customData.speed;
+              // 标记金币正在接触平台
+              coinBody.plugin.touchingPlatform = true;
+              coinBody.plugin.platformId = platformBody.id;
+              
+              // 获取金币相对于平台的位置关系
+              const coinAbovePlatform = coinBody.position.y < platformBody.position.y;
+              
+              // 根据平台的移动方向和金币的位置应用不同的力
+              let forceMagnitude = 0.0015;
+              
+              // 如果平台向上移动并且金币在平台上方，增加力量确保金币被有效推动
+              if (direction < 0 && coinAbovePlatform) {
+                forceMagnitude = 0.004; // 使用更大的力
                 
-                // 设置金币速度，继承平台的部分速度
-                this.Body.setVelocity(coinBody, {
-                  x: coinBody.velocity.x,
-                  y: direction * speed * 0.7 // 继承70%的平台速度
+                // 设置特殊粘附效果
+                coinBody.plugin.stickyEffect = true;
+                
+                // 降低金币的密度和空气摩擦力，使其更容易被推动
+                this.Body.set(coinBody, {
+                  density: 0.001,    // 非常轻
+                  frictionAir: 0.001 // 几乎没有空气阻力
                 });
                 
-                // 记录继承的平台速度
-                coinBody.plugin.inheritedVelocityY = direction * speed * 0.7;
-              }
-            }
-            
-            // 延迟恢复金币的正常物理特性，给金币一点时间保持被推动的状态
-            setTimeout(() => {
-              if (coinBody.plugin) {
-                // 根据离开平台的时间长短调整物理属性恢复
-                const timeElapsed = Date.now() - (coinBody.plugin.leftPlatformTime || 0);
-                
-                if (timeElapsed > 300) { // 完全恢复
-                  this.Body.set(coinBody, {
-                    friction: 1.5,        // 恢复较大的摩擦力
-                    frictionAir: 0.5,     // 恢复较大的空气摩擦力
-                    frictionStatic: 1.5,  // 恢复较大的静摩擦力
-                    density: 0.1          // 恢复原始密度
+                // 如果金币非常靠近平台，直接调整其位置和速度以确保紧密跟随
+                const distY = Math.abs(platformBody.position.y - coinBody.position.y);
+                if (distY < 15) {
+                  // 直接跟随平台移动
+                  this.Body.setPosition(coinBody, {
+                    x: coinBody.position.x,
+                    y: coinBody.position.y + direction * speed * 1.2
                   });
                   
-                  // 清除所有平台相关标记
-                  delete coinBody.plugin.justLeftPlatform;
-                  delete coinBody.plugin.platformVelocityY;
-                  delete coinBody.plugin.leftPlatformTime;
-                  delete coinBody.plugin.inheritedVelocityY;
-                } else { // 部分恢复
-                  this.Body.set(coinBody, {
-                    friction: 1.0,        // 部分恢复摩擦力
-                    frictionAir: 0.3,     // 部分恢复空气摩擦力
-                    frictionStatic: 1.0,  // 部分恢复静摩擦力
-                    density: 0.08         // 部分恢复密度
+                  // 设置与平台相同的速度
+                  this.Body.setVelocity(coinBody, {
+                    x: coinBody.velocity.x,
+                    y: direction * speed * 1.2
                   });
                 }
               }
-            }, 100); // 短暂延迟，避免立即改变物理特性
+              
+              // 应用力，使金币跟随平台移动
+              this.Body.applyForce(coinBody, coinBody.position, {
+                x: 0,
+                y: direction * speed * forceMagnitude
+              });
+            }
+          }
+        });
+      });
+      
+      // 处理碰撞结束事件 - 标记刚离开平台的金币
+      this.Events.on(this.engine, 'collisionEnd', (event) => {
+        // 处理所有碰撞对
+        event.pairs.forEach((pair) => {
+          // 检查碰撞对象是否是金币和动态平台
+          const isMovablePlatform = pair.bodyA === this.platformMotion.platform || 
+                                    pair.bodyB === this.platformMotion.platform;
+          
+          const coinBody = pair.bodyA.plugin?.isCoin ? pair.bodyA : 
+                          (pair.bodyB.plugin?.isCoin ? pair.bodyB : null);
+          
+          if (isMovablePlatform && coinBody && coinBody.plugin) {
+            // 获取平台对象
+            const platformBody = pair.bodyA === this.platformMotion.platform ? 
+                                 pair.bodyA : pair.bodyB;
+            
+            // 标记金币刚刚离开平台
+            coinBody.plugin.touchingPlatform = false;
+            coinBody.plugin.justLeftPlatform = true;
+            coinBody.plugin.leftPlatformTime = Date.now();
+            
+            // 特殊处理：在平台向上移动时，金币离开后应继续保持影响
+            if (platformBody.customData && platformBody.customData.direction < 0) {
+              // 设置扩展影响标记
+              coinBody.plugin.extendedPlatformInfluence = true;
+              coinBody.plugin.influenceDirection = platformBody.customData.direction;
+              coinBody.plugin.influenceSpeed = platformBody.customData.speed;
+              
+              // 为金币设置部分平台速度，使其继续向上运动一段时间
+              this.Body.setVelocity(coinBody, {
+                x: coinBody.velocity.x,
+                y: platformBody.customData.direction * platformBody.customData.speed * 1.2
+              });
+              
+              // 设置一个定时器，在短时间后恢复金币的物理属性
+              setTimeout(() => {
+                if (coinBody.plugin) {
+                  // 标记扩展影响结束
+                  coinBody.plugin.extendedPlatformInfluence = false;
+                  
+                  // 逐渐恢复物理属性
+                  this.Body.set(coinBody, {
+                    density: 0.05,    // 正常密度
+                    frictionAir: 0.2  // 正常空气摩擦力
+                  });
+                }
+              }, 300); // 300毫秒后开始恢复
+            } else {
+              // 为金币设置部分平台速度，使其继续保持一定动量
+              if (platformBody.customData) {
+                this.Body.setVelocity(coinBody, {
+                  x: coinBody.velocity.x,
+                  y: coinBody.velocity.y * 0.8 + platformBody.customData.direction * platformBody.customData.speed * 0.2
+                });
+              }
+              
+              // 设置一个定时器，在短时间后恢复金币的物理属性和清除标记
+              setTimeout(() => {
+                if (coinBody.plugin) {
+                  coinBody.plugin.justLeftPlatform = false;
+                  coinBody.plugin.affectedByPlatform = true;
+                  
+                  // 设置另一个定时器，在更长时间后清除所有影响
+                  setTimeout(() => {
+                    if (coinBody.plugin) {
+                      coinBody.plugin.affectedByPlatform = false;
+                    }
+                  }, 500); // 500毫秒后完全清除影响
+                }
+              }, 200); // 200毫秒后开始转换状态
+            }
           }
         });
       });
@@ -480,6 +456,71 @@ export default {
           // 获取平台方向和速度
           const direction = platform.customData.direction;
           const speed = platform.customData.speed;
+          
+          // 特殊处理：额外检查所有金币，查找有粘附标记或特殊影响标记的金币
+          // 这对向上移动特别重要
+          if (direction < 0) { // 平台向上移动
+            this.coins.forEach(coin => {
+              if (coin.plugin && (coin.plugin.stickyEffect || 
+                                 coin.plugin.extendedPlatformInfluence || 
+                                 coin.plugin.stuckToPlatform)) {
+                
+                // 计算距离平台的距离
+                const distY = Math.abs(platform.position.y - coin.position.y);
+                
+                // 根据距离设置不同的效果强度
+                if (distY < 50) { // 在较近距离内应用强粘附效果
+                  const influenceFactor = Math.max(0, 1 - distY/50); // 距离越近影响越强
+                  
+                  // 应用额外的向上力
+                  this.Body.applyForce(coin, coin.position, {
+                    x: 0,
+                    y: direction * speed * 0.003 * influenceFactor
+                  });
+                  
+                  // 如果非常接近平台，直接设置位置和速度
+                  if (distY < 15) {
+                    // 直接跟随平台移动
+                    this.Body.setPosition(coin, {
+                      x: coin.position.x,
+                      y: coin.position.y + direction * speed
+                    });
+                    
+                    // 设置与平台相同的速度
+                    this.Body.setVelocity(coin, {
+                      x: coin.velocity.x,
+                      y: direction * speed * 1.1
+                    });
+                  }
+                  
+                  // 记录跟随状态的持续时间
+                  const now = Date.now();
+                  if (!coin.plugin.stickyStartTime) {
+                    coin.plugin.stickyStartTime = now;
+                  }
+                  
+                  // 如果粘附时间过长，开始逐渐减弱影响
+                  const stickyDuration = now - (coin.plugin.stickyStartTime || now);
+                  if (stickyDuration > 1000) { // 超过1秒
+                    // 逐渐恢复正常特性
+                    const recoverFactor = Math.min(1, (stickyDuration - 1000) / 2000);
+                    this.Body.set(coin, {
+                      density: 0.01 + 0.09 * recoverFactor,
+                      frictionAir: 0.01 + 0.49 * recoverFactor
+                    });
+                    
+                    // 如果超过3秒，完全清除粘附效果
+                    if (stickyDuration > 3000) {
+                      delete coin.plugin.stickyEffect;
+                      delete coin.plugin.extendedPlatformInfluence;
+                      delete coin.plugin.stuckToPlatform;
+                      delete coin.plugin.stickyStartTime;
+                    }
+                  }
+                }
+              }
+            });
+          }
           
           // 根据平台的移动方向设置检测区域
           const platformBounds = platform.bounds;
@@ -518,22 +559,30 @@ export default {
                 
                 // 应用额外的推力，确保金币跟随平台运动 - 使用固定速度值
                 if (forceFactor > 0) {
+                  // 向上运动时使用更大的力
+                  const upwardBoost = direction < 0 ? 3.0 : 1.0;
+                  
                   this.Body.applyForce(coin, coin.position, {
                     x: 0,
-                    y: direction * speed * 0.0003 * forceFactor
+                    y: direction * speed * 0.0003 * forceFactor * upwardBoost
                   });
                   
                   // 直接调整位置，进一步确保金币跟随平台 - 使用固定速度值
                   if (forceFactor > 0.7) { // 只对非常接近的金币应用位置调整
+                    // 向上运动时使用更大的位置调整
+                    const positionBoost = direction < 0 ? 1.5 : 1.0;
+                    
                     this.Body.setPosition(coin, {
                       x: coin.position.x,
-                      y: coin.position.y + direction * speed * 0.1 * forceFactor
+                      y: coin.position.y + direction * speed * 0.1 * forceFactor * positionBoost
                     });
                     
-                    // 同步部分速度
+                    // 同步部分速度 - 向上运动时设置更大的速度继承
+                    const velocityBoost = direction < 0 ? 1.5 : 1.0;
+                    
                     this.Body.setVelocity(coin, {
                       x: coin.velocity.x,
-                      y: coin.velocity.y * 0.9 + direction * speed * 0.1 * forceFactor
+                      y: coin.velocity.y * 0.9 + direction * speed * 0.1 * forceFactor * velocityBoost
                     });
                   }
                 }
@@ -1100,37 +1149,88 @@ export default {
           });
           
         } else if (deltaY < 0) { // 平台向上移动
-          // 定义平台上方的检测区域
+          // 定义平台上方的检测区域 - 显著增大检测范围
           const region = {
-            min: { x: platformBounds.min.x, y: platformBounds.min.y - 10 },
-            max: { x: platformBounds.max.x, y: platformBounds.min.y }
+            min: { x: platformBounds.min.x - 5, y: platformBounds.min.y - 20 }, // 增大检测高度
+            max: { x: platformBounds.max.x + 5, y: platformBounds.min.y + 5 }  // 包括平台下方一部分区域
           };
           
           // 使用所有金币进行区域查询
           this.coins.forEach(coin => {
-            // 检查金币是否在平台正上方区域
+            // 检查金币是否在平台上方区域
             if (coin.position.x >= region.min.x && 
                 coin.position.x <= region.max.x && 
                 coin.position.y >= region.min.y && 
                 coin.position.y <= region.max.y) {
               
-              // 给金币一个向上的推力，模拟被平台推动 - 使用固定力值
+              // 给金币一个向上的推力，模拟被平台推动 - 使用更大的力值
               this.Body.applyForce(coin, coin.position, {
                 x: 0,
-                y: -platform.customData.speed * 0.001 // 力的大小与平台速度成正比，但保持恒定
+                y: -platform.customData.speed * 0.003 // 增加向上推力
               });
               
-              // 更新金币位置，跟随平台移动
+              // 更新金币位置，直接跟随平台移动
               this.Body.setPosition(coin, {
                 x: coin.position.x,
-                y: coin.position.y - platform.customData.speed * 0.9 // 金币移动速度为平台速度的90%
+                y: coin.position.y + deltaY * 1.1 // 增加移动幅度，确保金币跟随平台
+              });
+              
+              // 强制设置速度，确保金币跟随平台
+              this.Body.setVelocity(coin, {
+                x: coin.velocity.x,
+                y: -platform.customData.speed // 设置与平台相同的速度
               });
               
               // 标记金币被平台影响
               coin.plugin = coin.plugin || {};
               coin.plugin.affectedByPlatform = true;
+              coin.plugin.touchingPlatform = true; // 特别标记接触状态
             }
           });
+          
+          // 额外检查：寻找应当跟随平台但尚未被检测到的金币
+          // 这对于向上运动尤其重要
+          if (platform.customData.direction < 0) { // 平台向上移动
+            const specialUpwardRegion = {
+              min: { x: platformBounds.min.x - 10, y: platformBounds.min.y - 5 },
+              max: { x: platformBounds.max.x + 10, y: platformBounds.max.y + 15 } // 包括平台下方区域
+            };
+            
+            this.coins.forEach(coin => {
+              // 寻找位于平台底部附近的金币
+              if (coin.position.x >= specialUpwardRegion.min.x && 
+                  coin.position.x <= specialUpwardRegion.max.x && 
+                  coin.position.y >= specialUpwardRegion.min.y && 
+                  coin.position.y <= specialUpwardRegion.max.y &&
+                  (!coin.plugin || !coin.plugin.affectedByPlatform)) {
+                
+                // 计算金币与平台的接近程度
+                const distToTop = Math.abs(coin.position.y - platformBounds.min.y);
+                const distToBottom = Math.abs(coin.position.y - platformBounds.max.y);
+                const distToEdge = Math.min(distToTop, distToBottom);
+                
+                // 如果金币非常靠近平台
+                if (distToEdge < 10) {
+                  // 设置强力黏附效果
+                  this.Body.setPosition(coin, {
+                    x: coin.position.x,
+                    y: coin.position.y + deltaY * 1.2
+                  });
+                  
+                  // 强制设置速度
+                  this.Body.setVelocity(coin, {
+                    x: coin.velocity.x,
+                    y: -platform.customData.speed * 1.1
+                  });
+                  
+                  // 标记为已处理
+                  coin.plugin = coin.plugin || {};
+                  coin.plugin.affectedByPlatform = true;
+                  coin.plugin.stuckToPlatform = true; // 特殊标记为黏附状态
+                }
+              }
+            });
+          }
         }
         
         // 处理平台扩展区域内的金币
