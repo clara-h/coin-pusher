@@ -61,13 +61,6 @@ export default {
         frequency: 0.015,  // 移动频率，设置为固定值
         time: 0           // 计时器
       },
-      // 压力感应系统
-      pressureSystem: {
-        threshold: 30,     // 触发穿透的金币数量阈值
-        maxCoinsToRelease: 5, // 一次最多释放几个金币
-        cooldown: 1000,   // 冷却时间(毫秒)
-        lastReleaseTime: 0    // 上次释放时间
-      },
       // 底部高摩擦力条
       movableObstacle: {
         body: null,       // 障碍物物体引用
@@ -440,21 +433,6 @@ export default {
             }
           });
         }
-        
-        // 边界检查可以降低频率
-        // 根据金币数量动态调整：金币越多，检查频率越低
-        const boundCheckInterval = this.coins.length > 50 ? 4 : 
-                                 this.coins.length > 20 ? 3 : 2;
-        if (timestamp % boundCheckInterval < 1) {
-          this.checkCoinsOutOfBounds();
-        }
-        
-        // 压力系统检查可以进一步降低频率
-        // 只在金币数量超过阈值的一半时才检查
-        if (this.coins.length >= this.pressureSystem.threshold / 2 && 
-            timestamp % 5 < 1) { // 每5帧检查一次
-          this.checkPressureSystem();
-        }
       });
     },
     // 从对象池获取金币对象
@@ -675,157 +653,14 @@ export default {
       // 这里可以实现实际的音效播放逻辑
       // console.log('播放金币掉落音效')
     },
-    // 检查压力系统 - 性能优化版本
-    checkPressureSystem() {
-      // 如果在冷却期，则跳过
-      const now = Date.now();
-      if (now - this.pressureSystem.lastReleaseTime < this.pressureSystem.cooldown) {
-        return;
-      }
-      
-      // 性能优化：如果金币少于阈值的一半，则不进行检测
-      const coinCount = this.coins.length;
-      if (coinCount < this.pressureSystem.threshold / 2) {
-        return;
-      }
-      
-      // 性能优化：使用更小的采样量
-      // 根据金币总数动态调整采样比例
-      const sampleSize = coinCount > 50 ? 10 : 
-                       coinCount > 30 ? 15 : 20;
-      
-      // 随机选择起始索引，确保不同次检查不同的金币
-      const startIndex = Math.floor(Math.random() * (coinCount - sampleSize + 1));
-      const sampleCoins = this.coins.slice(startIndex, startIndex + sampleSize);
-      
-      // 检查是否有金币堆积在游戏区域中部 - 简化检查逻辑
-      const middleY = 300; // 游戏区域中部位置
-      let middleCoinsCount = 0;
-      
-      // 使用简单计数而不是filter，减少对象创建
-      for (let i = 0; i < sampleCoins.length; i++) {
-        const coin = sampleCoins[i];
-        if (Math.abs(coin.position.y - middleY) < 50 && 
-            Math.abs(coin.velocity.y) < 0.5) {
-          middleCoinsCount++;
-          // 一旦找到足够的堆积金币，立即进行下一步检查
-          if (middleCoinsCount >= 3) break;
-        }
-      }
-      
-      // 如果有金币堆积在中部，检查底部障碍物上的金币堆积情况
-      if (middleCoinsCount >= 3) {
-        // 获取底部障碍物的位置信息 - 缓存以提高性能
-        const obstacle = this.movableObstacle.body;
-        if (!obstacle) return;
-        
-        const obstacleX = obstacle.position.x;
-        const obstacleY = obstacle.position.y;
-        const obstacleWidth = this.movableObstacle.width;
-        
-        // 性能优化：使用更高效的采样方法
-        // 每隔几个金币采样一个，采样间隔根据金币数量动态调整
-        const sampleInterval = coinCount > 50 ? 6 : 
-                             coinCount > 30 ? 4 : 3;
-        
-        let coinsAboveObstacleCount = 0;
-        
-        // 使用for循环和计数器代替filter，减少对象创建
-        for (let i = 0; i < coinCount; i += sampleInterval) {
-          const coin = this.coins[i];
-          if (!coin) continue;
-          
-          if (Math.abs(coin.position.x - obstacleX) < obstacleWidth/2 && 
-              Math.abs(coin.position.y - obstacleY) < 80 && 
-              coin.position.y < obstacleY) {
-            coinsAboveObstacleCount++;
-          }
-        }
-        
-      }
-    },
-    // 检查金币是否超出边界 - 性能优化版本
-    checkCoinsOutOfBounds() {
-      // 性能优化：根据金币数量动态调整检查频率
-      const coinCount = this.coins.length;
-      if (coinCount === 0) return; // 没有金币时直接返回
-      
-      // 动态调整检查频率：金币越多，检查频率越低
-      const checkInterval = coinCount > 50 ? 6 : 
-                           coinCount > 30 ? 4 : 
-                           coinCount > 10 ? 2 : 1;
-                           
-      // 使用引擎时间戳来确保帧率独立性
-      if (this.engine.timing.timestamp % checkInterval >= 1) {
-        return; // 只在特定帧检查
-      }
-      
-      // 性能优化：只检查部分金币，而不是全部
-      // 根据金币数量动态调整检查比例
-      const checkRatio = coinCount > 50 ? 0.3 : 
-                       coinCount > 30 ? 0.5 : 1.0;
-      
-      // 计算本次要检查的金币数量
-      const coinsToCheck = Math.ceil(coinCount * checkRatio);
-      
-      // 随机选择起始索引，确保不同帧检查不同的金币
-      const startIndex = Math.floor(Math.random() * (coinCount - coinsToCheck + 1));
-      
-      // 获取可移动障碍物的位置信息 - 缓存以提高性能
-      const obstacle = this.movableObstacle.body;
-      const obstacleTop = obstacle ? obstacle.bounds.min.y : 400;
-      const obstacleWidth = this.movableObstacle.width;
-      
-      // 获取顶部可移动底板的位置信息 - 缓存以提高性能
-      const topPlatform = this.platformMotion.platform;
-      const topPlatformBottom = topPlatform ? topPlatform.bounds.max.y : this.dropArea.y + 5;
-      
-      // 检查选定的金币子集
-      for (let i = 0; i < coinsToCheck; i++) {
-        const index = startIndex + i;
-        if (index >= coinCount) break; // 安全检查
-        
-        const coin = this.coins[index];
-        if (!coin) continue; // 安全检查
-        
-        // 如果金币有穿透标记，暂时不检查是否超出边界
-        if (coin.plugin && coin.plugin.isPenetrating) {
-          continue;
-        }
-        
-        // 性能优化：使用简化的边界检查逻辑
-        // 只检查明显超出边界的情况
-        const coinY = coin.position.y;
-        const coinX = coin.position.x;
-        
-        // 快速检查是否彻底超出边界 - 这些情况无需进一步检查
-        if (coinY > 600 || coinY < -50) {
-          this.removeCoin(coin, index);
-          continue;
-        }
-        
-        // 只有当金币接近下边界时才进行详细检查
-        if (coinY > 400) {
-          // 简化的障碍物检查
-          const isCoinAboveObstacle = obstacle && 
-                                    Math.abs(coinX - obstacle.position.x) < obstacleWidth/2 && 
-                                    coinY < obstacleTop + 30;
-          
-          // 如果不在障碍物上方，则移除
-          if (!isCoinAboveObstacle) {
-            this.removeCoin(coin, index);
-          }
-        }
-      }
-    },
-    
+
     // 辅助方法：移除金币 - 提取为单独方法以减少代码重复
     removeCoin(coin, index) {
       // 记录金额
       if (coin.value) {
         this.totalValue += coin.value;
       }
-      
+
       // 从数组中移除 - 使用提供的索引或查找索引
       const coinIndex = index !== undefined ? index : this.coins.indexOf(coin);
       if (coinIndex !== -1) {
