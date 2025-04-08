@@ -934,88 +934,32 @@ export default {
           });
           
         } else if (deltaY < 0) { // 平台向上移动
-          // 定义平台上方的检测区域 - 显著增大检测范围
+          // 平台向上移动时，不推动金币，只让金币自然下落
+          // 定义平台下方的检测区域
           const region = {
-            min: { x: platformBounds.min.x - 5, y: platformBounds.min.y - 20 }, // 增大检测高度
-            max: { x: platformBounds.max.x + 5, y: platformBounds.min.y + 5 }  // 包括平台下方一部分区域
+            min: { x: platformBounds.min.x - 5, y: platformBounds.max.y },
+            max: { x: platformBounds.max.x + 5, y: platformBounds.max.y + 20 }
           };
           
           // 使用所有金币进行区域查询
           this.coins.forEach(coin => {
-            // 检查金币是否在平台上方区域
+            // 检查金币是否在平台下方区域
             if (coin.position.x >= region.min.x && 
                 coin.position.x <= region.max.x && 
                 coin.position.y >= region.min.y && 
                 coin.position.y <= region.max.y) {
               
-              // 给金币一个向上的推力，模拟被平台推动 - 使用固定力值
+              // 给金币一个向下的推力，防止金币被平台卡住
               this.Body.applyForce(coin, coin.position, {
                 x: 0,
-                y: -0.003 // 使用固定力值，不受金币数量影响
-              });
-              
-              // 更新金币位置，直接跟随平台移动
-              this.Body.setPosition(coin, {
-                x: coin.position.x,
-                y: coin.position.y + deltaY * 1.1 // 增加移动幅度，确保金币跟随平台
-              });
-              
-              // 强制设置速度，确保金币跟随平台
-              this.Body.setVelocity(coin, {
-                x: coin.velocity.x,
-                y: -0.8 // 使用固定速度值，不受金币数量影响
+                y: 0.0005 // 使用较小的固定力值，防止金币被卡住
               });
               
               // 标记金币被平台影响
               coin.plugin = coin.plugin || {};
               coin.plugin.affectedByPlatform = true;
-              coin.plugin.touchingPlatform = true; // 特别标记接触状态
             }
           });
-          
-          // 额外检查：寻找应当跟随平台但尚未被检测到的金币
-          // 这对于向上运动尤其重要
-          if (platform.customData.direction < 0) { // 平台向上移动
-            const specialUpwardRegion = {
-              min: { x: platformBounds.min.x - 10, y: platformBounds.min.y - 5 },
-              max: { x: platformBounds.max.x + 10, y: platformBounds.max.y + 15 } // 包括平台下方区域
-            };
-            
-            this.coins.forEach(coin => {
-              // 寻找位于平台底部附近的金币
-              if (coin.position.x >= specialUpwardRegion.min.x && 
-                  coin.position.x <= specialUpwardRegion.max.x && 
-                  coin.position.y >= specialUpwardRegion.min.y && 
-                  coin.position.y <= specialUpwardRegion.max.y &&
-                  (!coin.plugin || !coin.plugin.affectedByPlatform)) {
-                
-                // 计算金币与平台的接近程度
-                const distToTop = Math.abs(coin.position.y - platformBounds.min.y);
-                const distToBottom = Math.abs(coin.position.y - platformBounds.max.y);
-                const distToEdge = Math.min(distToTop, distToBottom);
-                
-                // 如果金币非常靠近平台
-                if (distToEdge < 10) {
-                  // 设置强力黏附效果
-                  this.Body.setPosition(coin, {
-                    x: coin.position.x,
-                    y: coin.position.y + deltaY * 1.2
-                  });
-                  
-                  // 强制设置速度
-                  this.Body.setVelocity(coin, {
-                    x: coin.velocity.x,
-                    y: -0.8 // 使用固定速度值，不受金币数量影响
-                  });
-                  
-                  // 标记为已处理
-                  coin.plugin = coin.plugin || {};
-                  coin.plugin.affectedByPlatform = true;
-                  coin.plugin.stuckToPlatform = true; // 特殊标记为黏附状态
-                }
-              }
-            });
-          }
         }
         
         // 处理平台扩展区域内的金币
@@ -1040,17 +984,20 @@ export default {
             
             // 如果金币足够接近平台
             if (distX < platformWidth / 2 && distY > 0 && distY < 20) {
-              // 弱推力效果 - 使用固定力值
-              this.Body.applyForce(coin, coin.position, {
-                x: 0,
-                y: platform.customData.direction * 0.0005 // 使用固定力值，不受金币数量影响
-              });
-              
-              // 弱位置调整
-              this.Body.setPosition(coin, {
-                x: coin.position.x,
-                y: coin.position.y + platform.customData.direction * 0.3 // 使用固定移动距离，不受金币数量影响
-              });
+              // 只在平台向下移动时应用推力
+              if (platform.customData.direction > 0) {
+                // 弱推力效果 - 使用固定力值
+                this.Body.applyForce(coin, coin.position, {
+                  x: 0,
+                  y: 0.0005 // 使用固定力值，不受金币数量影响
+                });
+                
+                // 弱位置调整
+                this.Body.setPosition(coin, {
+                  x: coin.position.x,
+                  y: coin.position.y + 0.3 // 使用固定移动距离，不受金币数量影响
+                });
+              }
             }
           }
         });
