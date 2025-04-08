@@ -528,7 +528,7 @@ export default {
             friction: 1.5,    // 极大的摩擦力
             frictionAir: 0.5, // 极大的空气摩擦力
             frictionStatic: 1.5, // 极大的静摩擦力
-            density: 0.1,     // 降低密度，使其更容易被推动
+            density: 0.2,     // 增加密度，使其更容易传递压力
             plugin: {}
           });
         } else {
@@ -539,9 +539,8 @@ export default {
             friction: 1.5,   // 极大的摩擦力
             frictionAir: 0.5, // 极大的空气摩擦力
             frictionStatic: 1.5, // 极大的静摩擦力
-            density: 0.1,    // 降低密度，使其更容易被推动
+            density: 0.2,    // 增加密度，使其更容易传递压力
             chamfer: { radius: 2 }, // 轻微圆角化
-            mass: 0.1, // 保持重量
             inertia: Infinity, // 设置较大的惯性值，防止旋转
             inverseInertia: 0, // 设置为0，使金币不容易旋转
             render: {
@@ -986,6 +985,8 @@ export default {
       
       // 检查金币是否被其他金币挤压
       let contactCount = 0;
+      let hasTopCoin = false; // 检查是否有金币在顶部
+      
       this.coins.forEach(otherCoin => {
         if (otherCoin !== coin) {
           // 计算两个金币之间的距离
@@ -996,12 +997,17 @@ export default {
           // 如果距离小于金币直径的1.2倍，认为有接触
           if (distance < 40) {
             contactCount++;
+            
+            // 检查是否有金币在顶部（Y坐标更小）
+            if (otherCoin.position.y < coin.position.y - 15) {
+              hasTopCoin = true;
+            }
           }
         }
       });
       
-      // 如果金币与3个或更多其他金币接触，认为受到较大压力
-      return contactCount >= 3;
+      // 如果金币与3个或更多其他金币接触，或者有金币在顶部，认为受到较大压力
+      return contactCount >= 3 || hasTopCoin;
     },
     
     // 优化方法：合并多个金币检查到一个遍历中
@@ -1043,8 +1049,8 @@ export default {
             y: 0.002 // 向下的力，模拟重力
           });
           
-          // 如果金币非常接近摩擦板，允许它穿过摩擦板
-          if (distToPlate < 5) {
+          // 如果金币非常接近摩擦板，允许它穿过摩擦板    
+          if (distToPlate < 2) {
             // 设置碰撞过滤器，允许穿过摩擦板
             coin.collisionFilter = {
               category: 0x0001,
@@ -1161,6 +1167,41 @@ export default {
           // 移除压力状态标记
           delete coin.plugin.underPressure;
           delete coin.plugin.pressureStartTime;
+        }
+        
+        // 6. 增强金币之间的压力传递效果
+        if (isUnderPressure) {
+          // 查找当前金币下方的金币
+          let bottomCoins = this.coins.filter(otherCoin => 
+            otherCoin !== coin && 
+            otherCoin.position.y > coin.position.y + 15 && 
+            Math.abs(otherCoin.position.x - coin.position.x) < 40
+          );
+          
+          // 对下方的金币应用压力传递
+          bottomCoins.forEach(bottomCoin => {
+            // 计算压力传递系数 - 距离越近，压力越大
+            const distY = bottomCoin.position.y - coin.position.y;
+            const pressureFactor = Math.max(0.1, Math.min(1.0, 1.0 - distY / 100));
+            
+            // 应用向下的力，模拟压力传递
+            this.Body.applyForce(bottomCoin, bottomCoin.position, {
+              x: 0,
+              y: 0.001 * pressureFactor // 向下的力，模拟压力传递
+            });
+            
+            // 降低下方金币的摩擦力，使其更容易被推动
+            this.Body.set(bottomCoin, {
+              friction: Math.max(0.1, bottomCoin.friction * 0.8),
+              frictionAir: Math.max(0.1, bottomCoin.frictionAir * 0.8),
+              frictionStatic: Math.max(0.1, bottomCoin.frictionStatic * 0.8)
+            });
+            
+            // 标记下方金币受到压力传递
+            bottomCoin.plugin = bottomCoin.plugin || {};
+            bottomCoin.plugin.pressureTransferred = true;
+            bottomCoin.plugin.pressureSource = coin.id;
+          });
         }
       }
     },
