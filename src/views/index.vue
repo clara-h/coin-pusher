@@ -317,41 +317,8 @@ export default {
               coinBody.plugin.touchingPlatform = true;
               coinBody.plugin.platformId = platformBody.id;
               
-              // 获取金币相对于平台的位置关系
-              const coinAbovePlatform = coinBody.position.y < platformBody.position.y;
-              
               // 根据平台的移动方向和金币的位置应用不同的力
               let forceMagnitude = 0.0015;
-              
-              // 如果平台向上移动并且金币在平台上方，增加力量确保金币被有效推动
-              if (direction < 0 && coinAbovePlatform) {
-                forceMagnitude = 0.004; // 使用更大的力
-                
-                // 设置特殊粘附效果
-                coinBody.plugin.stickyEffect = true;
-                
-                // 降低金币的密度和空气摩擦力，使其更容易被推动
-                this.Body.set(coinBody, {
-                  density: 0.001,    // 非常轻
-                  frictionAir: 0.001 // 几乎没有空气阻力
-                });
-                
-                // 如果金币非常靠近平台，直接调整其位置和速度以确保紧密跟随
-                const distY = Math.abs(platformBody.position.y - coinBody.position.y);
-                if (distY < 15) {
-                  // 直接跟随平台移动
-                  this.Body.setPosition(coinBody, {
-                    x: coinBody.position.x,
-                    y: coinBody.position.y + direction * speed * 1.2
-                  });
-                  
-                  // 设置与平台相同的速度
-                  this.Body.setVelocity(coinBody, {
-                    x: coinBody.velocity.x,
-                    y: direction * speed * 1.2
-                  });
-                }
-              }
               
               // 应用力，使金币跟随平台移动
               this.Body.applyForce(coinBody, coinBody.position, {
@@ -892,71 +859,6 @@ export default {
           }
         }
         
-        // 根据采样估算总数
-        const estimatedTotal = coinsAboveObstacleCount * sampleInterval;
-        
-        // 如果估计障碍物上的金币数量超过阈值，执行压力释放
-        if (estimatedTotal >= this.pressureSystem.threshold) {
-          // 性能优化：直接选择最靠近障碍物的几个金币
-          // 而不是先过滤再排序
-          const maxCoinsToFind = this.pressureSystem.maxCoinsToRelease * 2; // 找比需要的多一些
-          const candidateCoins = [];
-          
-          // 只检查一小部分金币
-          const coinsToCheck = Math.min(coinCount, 30);
-          for (let i = 0; i < coinsToCheck; i++) {
-            const coin = this.coins[i];
-            if (Math.abs(coin.position.x - obstacleX) < obstacleWidth/2 &&
-                obstacleY - coin.position.y < 30 && 
-                coin.position.y < obstacleY) {
-              candidateCoins.push(coin);
-              if (candidateCoins.length >= maxCoinsToFind) break;
-            }
-          }
-          
-          // 选择最靠近障碍物的几个金币
-          const bottomLayerCoins = candidateCoins
-            .slice(0, Math.min(this.pressureSystem.maxCoinsToRelease, candidateCoins.length));
-          
-          // 让这些金币穿透障碍物
-          bottomLayerCoins.forEach(coin => {
-            // 临时修改金币的碰撞组，使其可以穿透障碍物
-            const originalCollisionFilter = {...coin.collisionFilter};
-            
-            // 特别标记这个金币，防止它被checkCoinsOutOfBounds方法清除
-            coin.plugin = coin.plugin || {};
-            coin.plugin.isPenetrating = true;
-            
-            // 设置为不与障碍物碰撞
-            coin.collisionFilter.group = -1;
-            coin.collisionFilter.mask = 0xFFFFFF;
-            
-            // 给金币一个向下的力，帮助其穿透
-            this.Body.applyForce(coin, coin.position, {
-              x: 0,
-              y: 0.05
-            });
-            
-            // 简化闪烁效果，减少定时器使用
-            coin.render.fillStyle = '#FF5722';
-            
-            // 恢复原始碰撞组，但此时已经穿过障碍物
-            setTimeout(() => {
-              coin.collisionFilter = originalCollisionFilter;
-              coin.render.fillStyle = undefined; // 恢复原始颜色
-              
-              // 延迟一段时间后移除穿透标记，允许金币在落到底部障碍物上后稳定一段时间再考虑移除
-              setTimeout(() => {
-                if (coin.plugin) {
-                  coin.plugin.isPenetrating = false;
-                }
-              }, 3000); // 3秒后允许金币正常检查是否超出边界
-            }, 500);
-          });
-          
-          // 更新最后释放时间
-          this.pressureSystem.lastReleaseTime = now;
-        }
       }
     },
     // 检查金币是否超出边界 - 性能优化版本
@@ -1133,13 +1035,13 @@ export default {
               // 给金币一个向下的推力，模拟被平台推动 - 使用固定力值
               this.Body.applyForce(coin, coin.position, {
                 x: 0,
-                y: platform.customData.speed * 0.001 // 力的大小与平台速度成正比，但保持恒定
+                y: 0.001 // 使用固定力值，不受金币数量影响
               });
               
               // 更新金币位置，跟随平台移动
               this.Body.setPosition(coin, {
                 x: coin.position.x,
-                y: coin.position.y + platform.customData.speed * 0.9 // 金币移动速度为平台速度的90%
+                y: coin.position.y + 0.9 // 使用固定移动距离，不受金币数量影响
               });
               
               // 标记金币被平台影响
@@ -1163,10 +1065,10 @@ export default {
                 coin.position.y >= region.min.y && 
                 coin.position.y <= region.max.y) {
               
-              // 给金币一个向上的推力，模拟被平台推动 - 使用更大的力值
+              // 给金币一个向上的推力，模拟被平台推动 - 使用固定力值
               this.Body.applyForce(coin, coin.position, {
                 x: 0,
-                y: -platform.customData.speed * 0.003 // 增加向上推力
+                y: -0.003 // 使用固定力值，不受金币数量影响
               });
               
               // 更新金币位置，直接跟随平台移动
@@ -1178,7 +1080,7 @@ export default {
               // 强制设置速度，确保金币跟随平台
               this.Body.setVelocity(coin, {
                 x: coin.velocity.x,
-                y: -platform.customData.speed // 设置与平台相同的速度
+                y: -0.8 // 使用固定速度值，不受金币数量影响
               });
               
               // 标记金币被平台影响
@@ -1220,7 +1122,7 @@ export default {
                   // 强制设置速度
                   this.Body.setVelocity(coin, {
                     x: coin.velocity.x,
-                    y: -platform.customData.speed * 1.1
+                    y: -0.8 // 使用固定速度值，不受金币数量影响
                   });
                   
                   // 标记为已处理
@@ -1258,13 +1160,13 @@ export default {
               // 弱推力效果 - 使用固定力值
               this.Body.applyForce(coin, coin.position, {
                 x: 0,
-                y: platform.customData.direction * platform.customData.speed * 0.0005
+                y: platform.customData.direction * 0.0005 // 使用固定力值，不受金币数量影响
               });
               
               // 弱位置调整
               this.Body.setPosition(coin, {
                 x: coin.position.x,
-                y: coin.position.y + platform.customData.direction * platform.customData.speed * 0.3
+                y: coin.position.y + platform.customData.direction * 0.3 // 使用固定移动距离，不受金币数量影响
               });
             }
           }
