@@ -645,11 +645,11 @@ export default {
     DropCoins() {
       console.log('掉落金币')
       // 限制最大金币数量，避免性能问题
-      if (this.coins.length > 100) {
-        console.log('金币数量过多，暂停掉落')
-        alert('金币太多了！清理一些再继续。')
-        return
-      }
+      // if (this.coins.length > 100) {
+      //   console.log('金币数量过多，暂停掉落')
+      //   alert('金币太多了！清理一些再继续。')
+      //   return
+      // }
       
       const coinCount = Math.floor(Math.random() * 5) + 3 // 随机3-7个金币
       const coinValues = [1, 5, 10, 25, 50] // 金币面值
