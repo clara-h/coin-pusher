@@ -296,6 +296,12 @@ export default {
         // 动态调整金币摩擦力
         this.adjustCoinFriction();
         
+        // 检查金币压力状态
+        this.checkCoinsPressure();
+        
+        // 检查金币是否穿过摩擦板
+        this.checkCoinsPassedPlate();
+        
         // 处理平台对刚刚脱离接触的金币的额外推动力 - 确保金币被顺利推动
         const platform = this.platformMotion.platform;
         if (platform && platform.customData) {
@@ -475,17 +481,11 @@ export default {
     
     DropCoins() {
       console.log('掉落金币')
-      // 限制最大金币数量，避免性能问题
-      // if (this.coins.length > 100) {
-      //   console.log('金币数量过多，暂停掉落')
-      //   alert('金币太多了！清理一些再继续。')
-      //   return
-      // }
       
       const coinCount = Math.floor(Math.random() * 5) + 3 // 随机3-7个金币
       const coinValues = [1, 5, 10, 25, 50] // 金币面值
       
-      // 记录本次投放的总金额
+      // 记录本次投放的总金额 - 仅用于显示，不会立即添加到总额
       let dropValue = 0
 
       // 设置掉落金币的时间间隔
@@ -584,10 +584,7 @@ export default {
       // 开始掉落第一个金币
       dropCoin(0);
       
-      // 更新总金额
-      setTimeout(() => {
-        this.totalValue += dropValue;
-      }, coinCount * dropInterval + 100);
+      // 不再更新总金额，只有在金币穿过摩擦板时才会更新
     },
     // 获取范围内的随机整数
     getRandomInt(min, max) {
@@ -659,11 +656,8 @@ export default {
 
     // 辅助方法：移除金币 - 提取为单独方法以减少代码重复
     removeCoin(coin, index) {
-      // 记录金额
-      if (coin.value) {
-        this.totalValue += coin.value;
-      }
-
+      // 不再在这里添加金额到总额，而是在checkCoinsPassedPlate中处理
+      
       // 从数组中移除 - 使用提供的索引或查找索引
       const coinIndex = index !== undefined ? index : this.coins.indexOf(coin);
       if (coinIndex !== -1) {
@@ -766,7 +760,7 @@ export default {
               });
               
               // 标记金币被平台影响
-              coin.plugin = coin.plugin || {};
+            coin.plugin = coin.plugin || {};
               coin.plugin.affectedByPlatform = true;
             }
           });
@@ -788,8 +782,8 @@ export default {
                 coin.position.y <= region.max.y) {
               
               // 给金币一个向下的推力，防止金币被平台卡住
-              this.Body.applyForce(coin, coin.position, {
-                x: 0,
+            this.Body.applyForce(coin, coin.position, {
+              x: 0,
                 y: 0.0005 // 使用较小的固定力值，防止金币被卡住
               });
               
@@ -876,26 +870,67 @@ export default {
           // 计算弹性系数 - 越接近摩擦板，弹性越小
           const restitutionFactor = Math.max(0.01, Math.min(0.05, 0.01 + distToPlate / 2000));
           
-          // 应用动态特性
-          this.Body.set(coin, {
-            friction: frictionFactor,
-            frictionAir: 0.5 * frictionFactor,
-            frictionStatic: 1.5 * frictionFactor,
-            restitution: restitutionFactor, // 动态弹性，但始终很小
-            mass: 0.1 * massReductionFactor, // 降低质量使其更容易被推动
-            inverseInertia: 0.1 / massReductionFactor // 增加响应性
-          });
+          // 检查金币是否受到较大压力
+          const isUnderPressure = this.checkCoinPressure(coin);
           
-          // 标记金币被调整过摩擦力
-          coin.plugin = coin.plugin || {};
-          coin.plugin.frictionAdjusted = true;
-          
-          // 非常接近摩擦板时，优化碰撞性能
-          if (distToPlate < 20) {
+          // 如果金币受到较大压力且非常接近摩擦板，应用特殊处理
+          if (isUnderPressure && distToPlate < 20) {
+            // 应用重力效果，移除摩擦力，允许金币掉下去
             this.Body.set(coin, {
-              slop: 0.1, // 增加允许重叠量
-              timeScale: 1.2 // 略微加快这些金币的物理计算
+              friction: 0.01, // 几乎无摩擦力
+              frictionAir: 0.01, // 几乎无空气摩擦力
+              frictionStatic: 0.01, // 几乎无静摩擦力
+              restitution: 0.01, // 保持低弹性
+              mass: 0.1, // 恢复正常质量
+              inverseInertia: 0, // 恢复正常惯性
+              slop: 0.05, // 恢复正常重叠量
+              timeScale: 1.0 // 恢复正常时间缩放
             });
+            
+            // 标记金币处于压力状态
+            coin.plugin = coin.plugin || {};
+            coin.plugin.underPressure = true;
+            coin.plugin.pressureStartTime = Date.now();
+            
+            // 应用向下的力，模拟重力
+            this.Body.applyForce(coin, coin.position, {
+              x: 0,
+              y: 0.002 // 向下的力，模拟重力
+            });
+            
+            // 如果金币非常接近摩擦板，允许它穿过摩擦板
+            if (distToPlate < 5) {
+              // 设置碰撞过滤器，允许穿过摩擦板
+              coin.collisionFilter = {
+                category: 0x0001,
+                mask: 0x0001 // 只与金币碰撞，不与摩擦板碰撞
+              };
+              
+              // 标记金币可以穿过摩擦板
+              coin.plugin.canPassThroughPlate = true;
+            }
+          } else {
+            // 应用动态特性
+            this.Body.set(coin, {
+              friction: frictionFactor,
+              frictionAir: 0.5 * frictionFactor,
+              frictionStatic: 1.5 * frictionFactor,
+              restitution: restitutionFactor, // 动态弹性，但始终很小
+              mass: 0.1 * massReductionFactor, // 降低质量使其更容易被推动
+              inverseInertia: 0.1 / massReductionFactor // 增加响应性
+            });
+            
+            // 标记金币被调整过摩擦力
+            coin.plugin = coin.plugin || {};
+            coin.plugin.frictionAdjusted = true;
+            
+            // 非常接近摩擦板时，优化碰撞性能
+            if (distToPlate < 20) {
+              this.Body.set(coin, {
+                slop: 0.1, // 增加允许重叠量
+                timeScale: 1.2 // 略微加快这些金币的物理计算
+              });
+            }
           }
         } else if (coin.plugin && coin.plugin.frictionAdjusted) {
           // 如果金币离开摩擦板区域，恢复默认摩擦力和质量
@@ -913,7 +948,129 @@ export default {
           // 移除标记
           delete coin.plugin.frictionAdjusted;
         }
+        
+        // 检查金币是否已经穿过摩擦板
+        if (coin.plugin && coin.plugin.canPassThroughPlate && coin.position.y > plateTopY + 30) {
+          // 恢复正常的碰撞过滤器
+          coin.collisionFilter = {
+            category: 0x0001,
+            mask: 0xFFFFFFFF // 恢复与所有物体的碰撞
+          };
+          
+          // 移除标记
+          delete coin.plugin.canPassThroughPlate;
+        }
+        
+        // 检查金币是否处于压力状态但已经离开摩擦板区域
+        if (coin.plugin && coin.plugin.underPressure && distToPlate > 30) {
+          // 移除压力状态标记
+          delete coin.plugin.underPressure;
+          delete coin.plugin.pressureStartTime;
+        }
       });
+    },
+    
+    // 添加新方法：检查金币是否受到较大压力
+    checkCoinPressure(coin) {
+      // 如果金币已经有压力标记，检查是否已经持续足够长时间
+      if (coin.plugin && coin.plugin.underPressure) {
+        const pressureDuration = Date.now() - coin.plugin.pressureStartTime;
+        // 如果压力状态持续超过500毫秒，保持压力状态
+        if (pressureDuration > 500) {
+          return true;
+        }
+      }
+      
+      // 检查金币的速度和加速度
+      const speed = Math.sqrt(coin.velocity.x * coin.velocity.x + coin.velocity.y * coin.velocity.y);
+      const acceleration = Math.sqrt(coin.force.x * coin.force.x + coin.force.y * coin.force.y);
+      
+      // 如果速度或加速度超过阈值，认为金币受到较大压力
+      if (speed > 3 || acceleration > 0.01) {
+        return true;
+      }
+      
+      // 检查金币是否被其他金币挤压
+      let contactCount = 0;
+      this.coins.forEach(otherCoin => {
+        if (otherCoin !== coin) {
+          // 计算两个金币之间的距离
+          const dx = coin.position.x - otherCoin.position.x;
+          const dy = coin.position.y - otherCoin.position.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          // 如果距离小于金币直径的1.2倍，认为有接触
+          if (distance < 40) {
+            contactCount++;
+          }
+        }
+      });
+      
+      // 如果金币与3个或更多其他金币接触，认为受到较大压力
+      return contactCount >= 3;
+    },
+    
+    // 添加新方法：检查所有金币的压力状态
+    checkCoinsPressure() {
+      // 获取底部摩擦板的位置
+      const bottomFrictionPlate = this.movableObstacle.body;
+      if (!bottomFrictionPlate) return;
+      
+      const plateBounds = bottomFrictionPlate.bounds;
+      const plateTopY = plateBounds.min.y;
+      
+      // 遍历所有金币
+      this.coins.forEach(coin => {
+        // 计算金币到摩擦板的距离
+        const distToPlate = coin.position.y - plateTopY;
+        
+        // 如果金币在摩擦板附近且受到较大压力
+        if (distToPlate > -10 && distToPlate < 30 && this.checkCoinPressure(coin)) {
+          // 应用向下的力，模拟重力
+          this.Body.applyForce(coin, coin.position, {
+            x: 0,
+            y: 0.002 // 向下的力，模拟重力
+          });
+          
+          // 如果金币非常接近摩擦板，允许它穿过摩擦板
+          if (distToPlate < 5) {
+            // 设置碰撞过滤器，允许穿过摩擦板
+            coin.collisionFilter = {
+              category: 0x0001,
+              mask: 0x0001 // 只与金币碰撞，不与摩擦板碰撞
+            };
+            
+            // 标记金币可以穿过摩擦板
+            coin.plugin = coin.plugin || {};
+            coin.plugin.canPassThroughPlate = true;
+          }
+        }
+      });
+    },
+    // 添加新方法：检查金币是否已经穿过摩擦板
+    checkCoinsPassedPlate() {
+      // 获取底部摩擦板的位置
+      const bottomFrictionPlate = this.movableObstacle.body;
+      if (!bottomFrictionPlate) return;
+      
+      const plateBounds = bottomFrictionPlate.bounds;
+      const plateTopY = plateBounds.min.y;
+      
+      // 遍历所有金币
+      for (let i = this.coins.length - 1; i >= 0; i--) {
+        const coin = this.coins[i];
+        
+        // 检查金币是否已经穿过摩擦板
+        if (coin.position.y > plateTopY + 30) {
+          // 记录金额并添加到总额
+          if (coin.value) {
+            this.totalValue += coin.value;
+          }
+          
+          // 移除金币
+          this.removeCoin(coin, i);
+        }
+      }
     },
   },
   beforeDestroy() {
