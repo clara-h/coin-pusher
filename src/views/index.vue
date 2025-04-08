@@ -708,7 +708,7 @@ export default {
           });
         } else {
           // 创建新的金币 - 无重力，只有巨大摩擦力
-          coin = this.Bodies.circle(position.x, position.y, 15, {
+          coin = this.Bodies.circle(position.x, position.y, 20, {
             angle: angle,
             restitution: 0.01, // 几乎没有弹性
             friction: 1.5,   // 极大的摩擦力
@@ -722,8 +722,8 @@ export default {
             render: {
               sprite: {
                 texture: this.createCoinTexture(value),
-                xScale: 1,
-                yScale: 1
+                xScale: 1.33,
+                yScale: 1.33
               }
             },
             slop: 0.05, // 允许物体轻微重叠
@@ -772,40 +772,40 @@ export default {
         return this.coinPool.textures[cacheKey];
       }
       
-      // 创建离屏 canvas - 减少分辨率以提高性能
+      // 创建离屏 canvas - 调整尺寸以适应更大的金币
       const canvas = document.createElement('canvas')
-      canvas.width = 30 // 减小尺寸
-      canvas.height = 30 // 减小尺寸
+      canvas.width = 40 // 调整尺寸
+      canvas.height = 40 // 调整尺寸
       const ctx = canvas.getContext('2d')
       
       // 清除画布，确保背景透明
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       
       // 简化渐变 - 减少颜色停止点
-      const gradient = ctx.createRadialGradient(15, 15, 5, 15, 15, 14)
+      const gradient = ctx.createRadialGradient(20, 20, 7, 20, 20, 19)
       gradient.addColorStop(0, '#FFEB3B') // 浅金色中心
       gradient.addColorStop(1, '#FF9800') // 深金色边缘
       
       // 绘制金币背景
       ctx.fillStyle = gradient
       ctx.beginPath()
-      ctx.arc(15, 15, 14, 0, Math.PI * 2)
+      ctx.arc(20, 20, 19, 0, Math.PI * 2)
       ctx.fill()
       
       // 绘制边框 - 使用更轻的颜色
       ctx.strokeStyle = 'rgba(184, 134, 11, 0.7)'
-      ctx.lineWidth = 0.5
+      ctx.lineWidth = 0.7
       ctx.beginPath()
-      ctx.arc(15, 15, 13, 0, Math.PI * 2)
+      ctx.arc(20, 20, 18, 0, Math.PI * 2)
       ctx.stroke()
       
       // 绘制金额
       ctx.fillStyle = '#8B4513'
-      const fontSize = value.toString().length > 1 ? 12 : 14
+      const fontSize = value.toString().length > 1 ? 16 : 18
       ctx.font = `bold ${fontSize}px Arial`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(value.toString(), 15, 15)
+      ctx.fillText(value.toString(), 20, 20)
       
       // 使用PNG格式保留透明度
       const texture = canvas.toDataURL('image/png');
