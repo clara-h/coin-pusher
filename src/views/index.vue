@@ -293,6 +293,9 @@ export default {
         // 底板移动每帧都需要执行以保持平滑
         this.updatePlatformPosition();
         
+        // 动态调整金币摩擦力
+        this.adjustCoinFriction();
+        
         // 处理平台对刚刚脱离接触的金币的额外推动力 - 确保金币被顺利推动
         const platform = this.platformMotion.platform;
         if (platform && platform.customData) {
@@ -846,6 +849,71 @@ export default {
           });
         }, 50);
       }
+    },
+    // 添加新方法：根据金币位置动态调整摩擦力
+    adjustCoinFriction() {
+      // 获取底部摩擦板的位置
+      const bottomFrictionPlate = this.movableObstacle.body;
+      if (!bottomFrictionPlate) return;
+      
+      const plateBounds = bottomFrictionPlate.bounds;
+      const plateTopY = plateBounds.min.y;
+      
+      // 遍历所有金币
+      this.coins.forEach(coin => {
+        // 计算金币到摩擦板的距离
+        const distToPlate = coin.position.y - plateTopY;
+        
+        // 如果金币在摩擦板附近
+        if (distToPlate > -30 && distToPlate < 100) {
+          // 根据距离计算摩擦力系数 - 越接近摩擦板，摩擦力越小
+          // 使用非线性函数使变化更自然
+          const frictionFactor = Math.max(0.1, Math.min(1.5, 1.5 - (distToPlate / 100)));
+          
+          // 计算质量系数 - 越接近摩擦板，质量越小（更容易被推动）
+          const massReductionFactor = Math.max(0.2, Math.min(1.0, 1.0 - (100 - distToPlate) / 130));
+          
+          // 计算弹性系数 - 越接近摩擦板，弹性越小
+          const restitutionFactor = Math.max(0.01, Math.min(0.05, 0.01 + distToPlate / 2000));
+          
+          // 应用动态特性
+          this.Body.set(coin, {
+            friction: frictionFactor,
+            frictionAir: 0.5 * frictionFactor,
+            frictionStatic: 1.5 * frictionFactor,
+            restitution: restitutionFactor, // 动态弹性，但始终很小
+            mass: 0.1 * massReductionFactor, // 降低质量使其更容易被推动
+            inverseInertia: 0.1 / massReductionFactor // 增加响应性
+          });
+          
+          // 标记金币被调整过摩擦力
+          coin.plugin = coin.plugin || {};
+          coin.plugin.frictionAdjusted = true;
+          
+          // 非常接近摩擦板时，优化碰撞性能
+          if (distToPlate < 20) {
+            this.Body.set(coin, {
+              slop: 0.1, // 增加允许重叠量
+              timeScale: 1.2 // 略微加快这些金币的物理计算
+            });
+          }
+        } else if (coin.plugin && coin.plugin.frictionAdjusted) {
+          // 如果金币离开摩擦板区域，恢复默认摩擦力和质量
+          this.Body.set(coin, {
+            friction: 1.5,
+            frictionAir: 0.5,
+            frictionStatic: 1.5,
+            restitution: 0.01, // 确保所有金币的弹性都很小
+            mass: 0.1, // 恢复默认质量
+            inverseInertia: 0, // 恢复默认惯性逆值
+            slop: 0.05, // 恢复默认允许重叠量
+            timeScale: 1.0 // 恢复默认时间缩放
+          });
+          
+          // 移除标记
+          delete coin.plugin.frictionAdjusted;
+        }
+      });
     },
   },
   beforeDestroy() {
