@@ -103,7 +103,7 @@ export default {
         engine: this.engine,
         options: {
           width: 400,
-          height: 600,
+          height: 400,
           wireframes: false,
           background: '#f8f9fa',
           showAngleIndicator: false
@@ -113,7 +113,7 @@ export default {
       // 创建边界 - 使用渐变色边界
       const walls = [
         // 底部边界 - 可见
-        this.Bodies.rectangle(200, 600, 390, 20, { 
+        this.Bodies.rectangle(200, 400, 390, 20, { 
           isStatic: true, 
           render: { 
             fillStyle: '#9c27b0',
@@ -128,14 +128,14 @@ export default {
           } 
         }),
         // 左侧边界
-        this.Bodies.rectangle(-10, 300, 20, 600, { 
+        this.Bodies.rectangle(-10, 200, 20, 400, { 
           isStatic: true, 
           render: { 
             visible: false 
           } 
         }),
         // 右侧边界
-        this.Bodies.rectangle(410, 300, 20, 600, { 
+        this.Bodies.rectangle(410, 200, 20, 400, { 
           isStatic: true, 
           render: { 
             fillStyle: '#999',
@@ -190,7 +190,7 @@ export default {
       // 创建固定在底部的高摩擦力条
       const movableObstacle = this.Bodies.rectangle(
         200, // 中心x坐标
-        500, // 底部位置，接近游戏区域底部
+        350, // 底部位置，接近游戏区域底部
         this.movableObstacle.width,
         this.movableObstacle.height,
         {
@@ -217,9 +217,9 @@ export default {
       // 创建从movableObstacle到顶部障碍物之间的高摩擦力区域
       const frictionZone = this.Bodies.rectangle(
         200, // 中心x坐标
-        (500 + this.dropArea.y) / 2, // 中心y坐标 (movableObstacle和顶部障碍物的中点)
+        (350 + this.dropArea.y) / 2, // 中心y坐标 (movableObstacle和顶部障碍物的中点)
         400, // 宽度，覆盖整个游戏区域宽度
-        500 - this.dropArea.y, // 高度，从顶部障碍物到movableObstacle的距离
+        350 - this.dropArea.y, // 高度，从顶部障碍物到movableObstacle的距离
         {
           isStatic: true,        // 设为静态，不可移动
           isSensor: true,        // 设为传感器，不会产生物理碰撞
@@ -988,7 +988,7 @@ export default {
       
       // 获取可移动障碍物的位置信息 - 缓存以提高性能
       const obstacle = this.movableObstacle.body;
-      const obstacleTop = obstacle ? obstacle.bounds.min.y : 600;
+      const obstacleTop = obstacle ? obstacle.bounds.min.y : 400;
       const obstacleWidth = this.movableObstacle.width;
       
       // 获取顶部可移动底板的位置信息 - 缓存以提高性能
@@ -1014,13 +1014,13 @@ export default {
         const coinX = coin.position.x;
         
         // 快速检查是否彻底超出边界 - 这些情况无需进一步检查
-        if (coinY > 800 || coinY < -50) {
+        if (coinY > 600 || coinY < -50) {
           this.removeCoin(coin, index);
           continue;
         }
         
         // 只有当金币接近下边界时才进行详细检查
-        if (coinY > 650) {
+        if (coinY > 400) {
           // 简化的障碍物检查
           const isCoinAboveObstacle = obstacle && 
                                     Math.abs(coinX - obstacle.position.x) < obstacleWidth/2 && 
@@ -1346,7 +1346,7 @@ export default {
 
 .coin-box {
   width: 400px;
-  height: 600px;
+  height: 400px;
   border: 3px solid #9c27b0;
   border-radius: 8px;
   overflow: hidden;
