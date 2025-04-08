@@ -33,6 +33,13 @@ export default {
       runner: null,
       coins: [],
       totalValue: 0,
+      // 金币对象池
+      coinPool: {
+        active: true,       // 是否启用对象池
+        maxSize: 50,        // 对象池最大大小
+        objects: [],        // 存储可重用的金币对象
+        textures: {}        // 缓存的金币纹理
+      },
       // 区域定义 - 向上移动300像素
       collectionArea: {
         x: 200,  // 中心x坐标
@@ -81,8 +88,9 @@ export default {
       console.log('初始化物理引擎')
       // 创建引擎
       this.engine = this.Engine.create({
-        positionIterations: 6, // 降低位置迭代次数，从8减为6
-        velocityIterations: 4  // 降低速度迭代次数，从6减为4
+        positionIterations: 4, // 进一步降低位置迭代次数，从6减为4
+        velocityIterations: 3,  // 进一步降低速度迭代次数，从4减为3
+        enableSleeping: true // 启用休眠功能，静止的物体将不参与计算
       })
       
       // 调整引擎重力
@@ -272,56 +280,131 @@ export default {
         });
       });
       
-      // 添加碰撞后事件，用于处理金币的重力
+      // 添加碰撞后事件，用于处理金币的重力 - 性能优化版本
       this.Events.on(this.engine, 'afterUpdate', () => {
         // 获取高摩擦力区域的位置信息
-        const frictionZone = walls.find(wall => wall.plugin?.isFrictionZone);
         const topObstacleY = this.dropArea.y + 5; // 顶部障碍物位置
         const bottomObstacleY = 500; // movableObstacle位置
         
-        // 处理所有金币
-        this.coins.forEach(coin => {
-          // 检查金币是否在高摩擦力区域内
-          const isInFrictionZone = 
-            coin.position.y > topObstacleY && 
-            coin.position.y < bottomObstacleY;
+        // 性能优化：只在每3帧处理一次，或者当金币数量较少时每帧处理
+        if (this.coins.length <= 20 || this.engine.timing.timestamp % 3 < 1) {
+          // 性能优化：只处理一部分金币，而不是全部
+          // 根据金币数量动态调整处理比例
+          const processRatio = this.coins.length > 50 ? 0.3 : 
+                             this.coins.length > 30 ? 0.5 : 0.8;
           
-          // 如果金币在高摩擦力区域内或已被标记为无重力
-          if (isInFrictionZone || coin.plugin?.noGravity) {
-            // 确保金币有plugin对象
-            coin.plugin = coin.plugin || {};
+          // 计算本次要处理的金币数量
+          const coinsToProcess = Math.ceil(this.coins.length * processRatio);
+          
+          // 随机选择起始索引，确保不同帧处理不同的金币
+          const startIndex = Math.floor(Math.random() * (this.coins.length - coinsToProcess + 1));
+          
+          // 只处理选定的金币子集
+          for (let i = 0; i < coinsToProcess; i++) {
+            const coin = this.coins[startIndex + i];
+            if (!coin) continue; // 安全检查
             
-            // 标记金币为无重力状态
-            coin.plugin.noGravity = true;
+            // 检查金币是否在高摩擦力区域内
+            const isInFrictionZone = 
+              coin.position.y > topObstacleY && 
+              coin.position.y < bottomObstacleY;
             
-            // 增加摩擦力，使金币更容易停止
-            this.Body.set(coin, {
-              friction: 0.95,       // 增加摩擦力
-              frictionAir: 0.2,     // 增加空气摩擦力
-              frictionStatic: 0.9,  // 增加静摩擦力
-              restitution: 0.01     // 降低弹性
-            });
-            
-            // 抵消重力影响
-            const gravity = this.engine.gravity;
-            const gravityForce = {
-              x: -coin.mass * gravity.x * gravity.scale,
-              y: -coin.mass * gravity.y * gravity.scale
-            };
-            
-            // 应用抵消重力的力
-            this.Body.applyForce(coin, coin.position, gravityForce);
+            // 如果金币在高摩擦力区域内或已被标记为无重力
+            if (isInFrictionZone || coin.plugin?.noGravity) {
+              // 确保金币有plugin对象
+              coin.plugin = coin.plugin || {};
+              
+              // 标记金币为无重力状态
+              coin.plugin.noGravity = true;
+              
+              // 性能优化：只在必要时设置物理属性
+              if (!coin.plugin.physicsSet) {
+                this.Body.set(coin, {
+                  friction: 0.95,       // 增加摩擦力
+                  frictionAir: 0.2,     // 增加空气摩擦力
+                  frictionStatic: 0.9,  // 增加静摩擦力
+                  restitution: 0.01     // 降低弹性
+                });
+                coin.plugin.physicsSet = true;
+              }
+              
+              // 性能优化：只对移动中的金币应用力
+              if (Math.abs(coin.velocity.y) > 0.05 || Math.abs(coin.velocity.x) > 0.05) {
+                // 抵消重力影响
+                const gravity = this.engine.gravity;
+                const gravityForce = {
+                  x: -coin.mass * gravity.x * gravity.scale,
+                  y: -coin.mass * gravity.y * gravity.scale
+                };
+                
+                // 应用抵消重力的力
+                this.Body.applyForce(coin, coin.position, gravityForce);
+              }
+            }
           }
-        });
+        }
       });
+
       
-      // 添加更新事件，用于移动底板
+      // 添加更新事件，用于移动底板 - 性能优化版本
       this.Events.on(this.engine, 'beforeUpdate', () => {
+        // 获取当前时间戳，用于控制不同方法的执行频率
+        const timestamp = this.engine.timing.timestamp;
+        
+        // 底板移动每帧都需要执行以保持平滑
         this.updatePlatformPosition();
-        this.checkCoinsOutOfBounds();
-        this.checkPressureSystem();
+        
+        // 边界检查可以降低频率
+        // 根据金币数量动态调整：金币越多，检查频率越低
+        const boundCheckInterval = this.coins.length > 50 ? 4 : 
+                                 this.coins.length > 20 ? 3 : 2;
+        if (timestamp % boundCheckInterval < 1) {
+          this.checkCoinsOutOfBounds();
+        }
+        
+        // 压力系统检查可以进一步降低频率
+        // 只在金币数量超过阈值的一半时才检查
+        if (this.coins.length >= this.pressureSystem.threshold / 2 && 
+            timestamp % 5 < 1) { // 每5帧检查一次
+          this.checkPressureSystem();
+        }
       });
     },
+    // 从对象池获取金币对象
+    getCoinFromPool(value) {
+      // 如果对象池未启用，直接返回null
+      if (!this.coinPool.active) return null;
+      
+      // 查找匹配面值的可重用金币
+      const poolIndex = this.coinPool.objects.findIndex(obj => obj.value === value);
+      
+      if (poolIndex !== -1) {
+        // 从对象池中移除并返回
+        return this.coinPool.objects.splice(poolIndex, 1)[0];
+      }
+      
+      return null; // 没有找到匹配的金币
+    },
+    
+    // 将金币返回到对象池
+    returnCoinToPool(coin) {
+      // 如果对象池未启用或已达到最大大小，直接返回
+      if (!this.coinPool.active || this.coinPool.objects.length >= this.coinPool.maxSize) return;
+      
+      // 重置金币状态
+      this.Body.setPosition(coin, {x: -100, y: -100}); // 移到不可见区域
+      this.Body.setVelocity(coin, {x: 0, y: 0});
+      this.Body.setAngularVelocity(coin, 0);
+      
+      // 重置插件数据
+      coin.plugin = {
+        pooled: true // 标记为对象池中的对象
+      };
+      
+      // 添加到对象池
+      this.coinPool.objects.push(coin);
+    },
+    
     DropCoins() {
       console.log('掉落金币')
       // 限制最大金币数量，避免性能问题
@@ -346,10 +429,20 @@ export default {
         const value = coinValues[Math.floor(Math.random() * coinValues.length)]
         dropValue += value
         
-        // 随机位置 - 在掉落区域范围内随机X坐标
+        // 获取可移动底板的实时位置
+        let dropY = this.dropArea.y // 默认位置，以防底板不存在
+        
+        // 如果底板存在，使用底板的实时位置
+        if (this.platformMotion.platform) {
+          // 获取底板的当前Y位置，并在其下方适当距离处掉落金币
+          // 使用底板的bounds.max.y获取底板底部的Y坐标
+          dropY = this.platformMotion.platform.bounds.max.y + 5; // 在底板下方5像素处掉落
+        }
+        
+        // 随机位置 - 在掉落区域范围内随机X坐标，Y坐标使用底板的实时位置
         const position = {
           x: this.getRandomInt(this.dropArea.minX, this.dropArea.maxX),
-          y: this.dropArea.y
+          y: dropY
         }
 
         // 随机旋转角度
@@ -361,57 +454,71 @@ export default {
           y: Math.random() * 2 + 1     // 1到3之间的随机值
         }
 
-        // 创建带有金额的金币
-        const coin = this.Bodies.circle(position.x, position.y, 15, {
-          angle: angle,
-          restitution: 0.05, // 降低弹性系数，减少弹跳
-          friction: 0.9,   // 增加摩擦力，让金币更容易停止
-          frictionAir: 0.001, // 增加空气摩擦力
-          frictionStatic: 0.5, // 增加静摩擦力
-          density: 1,    // 保持重量
-          chamfer: { radius: 2 }, // 轻微圆角化
-          mass: 0.1, // 保持重量
-          inertia: Infinity, // 设置较大的惯性值，防止旋转
-          inverseInertia: 0, // 设置为0，使金币不容易旋转
-          render: {
-            sprite: {
-              texture: this.createCoinTexture(value),
-              xScale: 1,
-              yScale: 1
-            }
-          },
-          slop: 0.05, // 允许物体轻微重叠
-          value: value, // 存储金额值
-          plugin: {
-            // 初始不设置noGravity标记，让金币先正常掉落
-            // 碰撞后会设置此标记
-          }
-        })
+        // 尝试从对象池获取金币
+        let coin = this.getCoinFromPool(value);
+        
+        if (coin) {
+          // 重用对象池中的金币
+          this.Body.setPosition(coin, position);
+          this.Body.setAngle(coin, angle);
+          this.Body.set(coin, {
+            restitution: 0.05,
+            friction: 0.9,
+            frictionAir: 0.001,
+            frictionStatic: 0.5,
+            plugin: {}
+          });
+        } else {
+          // 创建新的金币
+          coin = this.Bodies.circle(position.x, position.y, 15, {
+            angle: angle,
+            restitution: 0.05, // 降低弹性系数，减少弹跳
+            friction: 0.9,   // 增加摩擦力，让金币更容易停止
+            frictionAir: 0.001, // 增加空气摩擦力
+            frictionStatic: 0.5, // 增加静摩擦力
+            density: 1,    // 保持重量
+            chamfer: { radius: 2 }, // 轻微圆角化
+            mass: 0.1, // 保持重量
+            inertia: Infinity, // 设置较大的惯性值，防止旋转
+            inverseInertia: 0, // 设置为0，使金币不容易旋转
+            render: {
+              sprite: {
+                texture: this.createCoinTexture(value),
+                xScale: 1,
+                yScale: 1
+              }
+            },
+            slop: 0.05, // 允许物体轻微重叠
+            value: value, // 存储金额值
+            plugin: {}
+          });
+        }
         
         // 设置初始速度
-        this.Body.setVelocity(coin, velocity)
+        this.Body.setVelocity(coin, velocity);
         
-        // 设置角速度 - 移除角速度以减少旋转
-        // this.Body.setAngularVelocity(coin, (Math.random() - 0.5) * 0.2)
-        this.Body.setAngularVelocity(coin, 0) // 设置为0，禁止初始旋转
+        // 设置角速度 - 设置为0，禁止初始旋转
+        this.Body.setAngularVelocity(coin, 0);
         
         // 添加到世界
-        this.World.add(this.engine.world, coin)
-        this.coins.push(coin)
+        if (!coin.world) { // 只有不在世界中的金币才需要添加
+          this.World.add(this.engine.world, coin);
+        }
         
-        console.log(`添加金币: ${value}, 位置: (${position.x}, ${position.y})`)
+        // 添加到活动金币数组
+        this.coins.push(coin);
         
         // 递归调用下一个金币掉落
-        setTimeout(() => dropCoin(index + 1), dropInterval)
+        setTimeout(() => dropCoin(index + 1), dropInterval);
       }
       
       // 开始掉落第一个金币
-      dropCoin(0)
+      dropCoin(0);
       
       // 更新总金额
       setTimeout(() => {
-        this.totalValue += dropValue
-      }, coinCount * dropInterval + 100)
+        this.totalValue += dropValue;
+      }, coinCount * dropInterval + 100);
     },
     // 获取范围内的随机整数
     getRandomInt(min, max) {
@@ -419,60 +526,54 @@ export default {
       max = Math.floor(max)
       return Math.floor(Math.random() * (max - min + 1)) + min
     },
-    // 创建金币纹理
+    // 创建金币纹理 - 优化版本
     createCoinTexture(value) {
-      // 使用缓存减少重复创建
+      // 使用对象池的纹理缓存
       const cacheKey = `coin_${value}`;
-      if (this._coinTextureCache && this._coinTextureCache[cacheKey]) {
-        return this._coinTextureCache[cacheKey];
+      if (this.coinPool.textures[cacheKey]) {
+        return this.coinPool.textures[cacheKey];
       }
       
-      // 创建离屏 canvas
+      // 创建离屏 canvas - 减少分辨率以提高性能
       const canvas = document.createElement('canvas')
-      canvas.width = 35
-      canvas.height = 35
+      canvas.width = 30 // 减小尺寸
+      canvas.height = 30 // 减小尺寸
       const ctx = canvas.getContext('2d')
       
-      // 创建径向渐变 - 从中心到边缘
-      const gradient = ctx.createRadialGradient(17.5, 17.5, 5, 17.5, 17.5, 15)
+      // 清除画布，确保背景透明
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      
+      // 简化渐变 - 减少颜色停止点
+      const gradient = ctx.createRadialGradient(15, 15, 5, 15, 15, 14)
       gradient.addColorStop(0, '#FFEB3B') // 浅金色中心
-      gradient.addColorStop(0.8, '#FFC107') // 金色
       gradient.addColorStop(1, '#FF9800') // 深金色边缘
       
       // 绘制金币背景
       ctx.fillStyle = gradient
       ctx.beginPath()
-      ctx.arc(17.5, 17.5, 15, 0, Math.PI * 2)
+      ctx.arc(15, 15, 14, 0, Math.PI * 2)
       ctx.fill()
       
-      // 绘制边框
-      ctx.strokeStyle = '#B8860B'
-      ctx.lineWidth = 1.5
+      // 绘制边框 - 使用更轻的颜色
+      ctx.strokeStyle = 'rgba(184, 134, 11, 0.7)'
+      ctx.lineWidth = 0.5
       ctx.beginPath()
-      ctx.arc(17.5, 17.5, 14, 0, Math.PI * 2)
-      ctx.stroke()
-      
-      // 金币内圆
-      ctx.strokeStyle = 'rgba(184, 134, 11, 0.5)'
-      ctx.beginPath()
-      ctx.arc(17.5, 17.5, 11, 0, Math.PI * 2)
+      ctx.arc(15, 15, 13, 0, Math.PI * 2)
       ctx.stroke()
       
       // 绘制金额
       ctx.fillStyle = '#8B4513'
-      const fontSize = value.toString().length > 1 ? 13 : 15
+      const fontSize = value.toString().length > 1 ? 12 : 14
       ctx.font = `bold ${fontSize}px Arial`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(value.toString(), 17.5, 17.5)
+      ctx.fillText(value.toString(), 15, 15)
       
-      const texture = canvas.toDataURL();
+      // 使用PNG格式保留透明度
+      const texture = canvas.toDataURL('image/png');
       
-      // 缓存纹理
-      if (!this._coinTextureCache) {
-        this._coinTextureCache = {};
-      }
-      this._coinTextureCache[cacheKey] = texture;
+      // 缓存纹理到对象池
+      this.coinPool.textures[cacheKey] = texture;
       
       return texture
     },
@@ -486,7 +587,7 @@ export default {
       // 这里可以实现实际的音效播放逻辑
       // console.log('播放金币掉落音效')
     },
-    // 检查压力系统
+    // 检查压力系统 - 性能优化版本
     checkPressureSystem() {
       // 如果在冷却期，则跳过
       const now = Date.now();
@@ -495,45 +596,89 @@ export default {
       }
       
       // 性能优化：如果金币少于阈值的一半，则不进行检测
-      if (this.coins.length < this.pressureSystem.threshold / 2) {
+      const coinCount = this.coins.length;
+      if (coinCount < this.pressureSystem.threshold / 2) {
         return;
       }
       
-      // 检查是否有金币堆积在游戏区域中部
+      // 性能优化：使用更小的采样量
+      // 根据金币总数动态调整采样比例
+      const sampleSize = coinCount > 50 ? 10 : 
+                       coinCount > 30 ? 15 : 20;
+      
+      // 随机选择起始索引，确保不同次检查不同的金币
+      const startIndex = Math.floor(Math.random() * (coinCount - sampleSize + 1));
+      const sampleCoins = this.coins.slice(startIndex, startIndex + sampleSize);
+      
+      // 检查是否有金币堆积在游戏区域中部 - 简化检查逻辑
       const middleY = 300; // 游戏区域中部位置
-      // 只检查部分金币而不是全部
-      const sampleCoins = this.coins.slice(0, Math.min(this.coins.length, 20));
-      const coinsInMiddle = sampleCoins.filter(coin => 
-        Math.abs(coin.position.y - middleY) < 50 && // 在游戏区域中部
-        Math.abs(coin.velocity.y) < 0.5 // 速度很小，表示已经停止或堆积
-      );
+      let middleCoinsCount = 0;
+      
+      // 使用简单计数而不是filter，减少对象创建
+      for (let i = 0; i < sampleCoins.length; i++) {
+        const coin = sampleCoins[i];
+        if (Math.abs(coin.position.y - middleY) < 50 && 
+            Math.abs(coin.velocity.y) < 0.5) {
+          middleCoinsCount++;
+          // 一旦找到足够的堆积金币，立即进行下一步检查
+          if (middleCoinsCount >= 3) break;
+        }
+      }
       
       // 如果有金币堆积在中部，检查底部障碍物上的金币堆积情况
-      if (coinsInMiddle.length > 0) {
-        // 获取底部障碍物上方的金币 - 使用采样而不是检查全部金币
+      if (middleCoinsCount >= 3) {
+        // 获取底部障碍物的位置信息 - 缓存以提高性能
         const obstacle = this.movableObstacle.body;
-        const coinsSample = this.coins.filter((_, index) => index % 3 === 0); // 只取三分之一的金币
-        const coinsAboveObstacle = coinsSample.filter(coin => 
-          Math.abs(coin.position.x - obstacle.position.x) < this.movableObstacle.width/2 && // 在障碍物上方
-          Math.abs(coin.position.y - obstacle.position.y) < 80 && // 靠近障碍物
-          coin.position.y < obstacle.position.y // 在障碍物上方
-        );
+        if (!obstacle) return;
+        
+        const obstacleX = obstacle.position.x;
+        const obstacleY = obstacle.position.y;
+        const obstacleWidth = this.movableObstacle.width;
+        
+        // 性能优化：使用更高效的采样方法
+        // 每隔几个金币采样一个，采样间隔根据金币数量动态调整
+        const sampleInterval = coinCount > 50 ? 6 : 
+                             coinCount > 30 ? 4 : 3;
+        
+        let coinsAboveObstacleCount = 0;
+        
+        // 使用for循环和计数器代替filter，减少对象创建
+        for (let i = 0; i < coinCount; i += sampleInterval) {
+          const coin = this.coins[i];
+          if (!coin) continue;
+          
+          if (Math.abs(coin.position.x - obstacleX) < obstacleWidth/2 && 
+              Math.abs(coin.position.y - obstacleY) < 80 && 
+              coin.position.y < obstacleY) {
+            coinsAboveObstacleCount++;
+          }
+        }
         
         // 根据采样估算总数
-        const estimatedTotal = coinsAboveObstacle.length * 3;
+        const estimatedTotal = coinsAboveObstacleCount * sampleInterval;
         
         // 如果估计障碍物上的金币数量超过阈值，执行压力释放
         if (estimatedTotal >= this.pressureSystem.threshold) {
-          // 找出障碍物上最底层的金币（受压最大的）
-          // 直接从coins数组中找最下面的几个，而不是排序全部
-          const bottomCoins = this.coins.filter(coin => 
-            Math.abs(coin.position.x - obstacle.position.x) < this.movableObstacle.width/2 &&
-            obstacle.position.y - coin.position.y < 30 && // 只找最靠近障碍物的
-            coin.position.y < obstacle.position.y
-          );
+          // 性能优化：直接选择最靠近障碍物的几个金币
+          // 而不是先过滤再排序
+          const maxCoinsToFind = this.pressureSystem.maxCoinsToRelease * 2; // 找比需要的多一些
+          const candidateCoins = [];
           
-          const bottomLayerCoins = bottomCoins
-            .slice(0, Math.min(this.pressureSystem.maxCoinsToRelease, bottomCoins.length));
+          // 只检查一小部分金币
+          const coinsToCheck = Math.min(coinCount, 30);
+          for (let i = 0; i < coinsToCheck; i++) {
+            const coin = this.coins[i];
+            if (Math.abs(coin.position.x - obstacleX) < obstacleWidth/2 &&
+                obstacleY - coin.position.y < 30 && 
+                coin.position.y < obstacleY) {
+              candidateCoins.push(coin);
+              if (candidateCoins.length >= maxCoinsToFind) break;
+            }
+          }
+          
+          // 选择最靠近障碍物的几个金币
+          const bottomLayerCoins = candidateCoins
+            .slice(0, Math.min(this.pressureSystem.maxCoinsToRelease, candidateCoins.length));
           
           // 让这些金币穿透障碍物
           bottomLayerCoins.forEach(coin => {
@@ -576,60 +721,100 @@ export default {
         }
       }
     },
-    // 检查金币是否超出边界
+    // 检查金币是否超出边界 - 性能优化版本
     checkCoinsOutOfBounds() {
-      // 性能优化：如果金币较少，则每帧都检查，否则间隔检查
-      if (this.coins.length > 20 && Date.now() % 3 !== 0) {
-        return; // 只在时间戳能被3整除时检查
+      // 性能优化：根据金币数量动态调整检查频率
+      const coinCount = this.coins.length;
+      if (coinCount === 0) return; // 没有金币时直接返回
+      
+      // 动态调整检查频率：金币越多，检查频率越低
+      const checkInterval = coinCount > 50 ? 6 : 
+                           coinCount > 30 ? 4 : 
+                           coinCount > 10 ? 2 : 1;
+                           
+      // 使用引擎时间戳来确保帧率独立性
+      if (this.engine.timing.timestamp % checkInterval >= 1) {
+        return; // 只在特定帧检查
       }
       
-      // 获取所有金币，创建数组副本
-      const allCoins = this.coins.slice();
+      // 性能优化：只检查部分金币，而不是全部
+      // 根据金币数量动态调整检查比例
+      const checkRatio = coinCount > 50 ? 0.3 : 
+                       coinCount > 30 ? 0.5 : 1.0;
       
-      // 检查每个金币
-      for (let i = allCoins.length - 1; i >= 0; i--) {
-        const coin = allCoins[i];
+      // 计算本次要检查的金币数量
+      const coinsToCheck = Math.ceil(coinCount * checkRatio);
+      
+      // 随机选择起始索引，确保不同帧检查不同的金币
+      const startIndex = Math.floor(Math.random() * (coinCount - coinsToCheck + 1));
+      
+      // 获取可移动障碍物的位置信息 - 缓存以提高性能
+      const obstacle = this.movableObstacle.body;
+      const obstacleTop = obstacle ? obstacle.bounds.min.y : 600;
+      const obstacleWidth = this.movableObstacle.width;
+      
+      // 获取顶部可移动底板的位置信息 - 缓存以提高性能
+      const topPlatform = this.platformMotion.platform;
+      const topPlatformBottom = topPlatform ? topPlatform.bounds.max.y : this.dropArea.y + 5;
+      
+      // 检查选定的金币子集
+      for (let i = 0; i < coinsToCheck; i++) {
+        const index = startIndex + i;
+        if (index >= coinCount) break; // 安全检查
+        
+        const coin = this.coins[index];
+        if (!coin) continue; // 安全检查
         
         // 如果金币有穿透标记，暂时不检查是否超出边界
         if (coin.plugin && coin.plugin.isPenetrating) {
           continue;
         }
         
-        // 获取可移动障碍物的位置信息
-        const obstacle = this.movableObstacle.body;
-        const obstacleTop = obstacle ? obstacle.bounds.min.y : 600;
+        // 性能优化：使用简化的边界检查逻辑
+        // 只检查明显超出边界的情况
+        const coinY = coin.position.y;
+        const coinX = coin.position.x;
         
-        // 获取顶部可移动底板的位置信息
-        const topPlatform = this.platformMotion.platform;
-        const topPlatformBottom = topPlatform ? topPlatform.bounds.max.y : this.dropArea.y + 5;
-        
-        // 只有当金币完全超出游戏区域或明显超出底部才移除
-        // 如果金币在障碍物上方，不要移除它
-        const isCoinAboveObstacle = obstacle && 
-                                  Math.abs(coin.position.x - obstacle.position.x) < this.movableObstacle.width/2 && 
-                                  coin.position.y < obstacleTop + 30;
-        
-        // 检查金币是否在顶部底板下方
-        const isCoinBelowTopPlatform = topPlatform && 
-                                     Math.abs(coin.position.x - topPlatform.position.x) < 200 && 
-                                     coin.position.y > topPlatformBottom - 5;
-        
-        // 只有当金币超出下边界且不在障碍物上方时才移除
-        if ((coin.position.y > 650 && !isCoinAboveObstacle) || 
-            (coin.position.y > 800) || // 彻底超出界限的情况
-            (coin.position.y < 0)) { // 超出上边界的情况
-          
-          // 从世界和数组中移除金币
-          this.World.remove(this.engine.world, coin);
-          
-          // 记录金额
-          if (coin.value) {
-            this.totalValue += coin.value;
-          }
-          
-          // 从数组中移除
-          this.coins.splice(this.coins.indexOf(coin), 1);
+        // 快速检查是否彻底超出边界 - 这些情况无需进一步检查
+        if (coinY > 800 || coinY < -50) {
+          this.removeCoin(coin, index);
+          continue;
         }
+        
+        // 只有当金币接近下边界时才进行详细检查
+        if (coinY > 650) {
+          // 简化的障碍物检查
+          const isCoinAboveObstacle = obstacle && 
+                                    Math.abs(coinX - obstacle.position.x) < obstacleWidth/2 && 
+                                    coinY < obstacleTop + 30;
+          
+          // 如果不在障碍物上方，则移除
+          if (!isCoinAboveObstacle) {
+            this.removeCoin(coin, index);
+          }
+        }
+      }
+    },
+    
+    // 辅助方法：移除金币 - 提取为单独方法以减少代码重复
+    removeCoin(coin, index) {
+      // 记录金额
+      if (coin.value) {
+        this.totalValue += coin.value;
+      }
+      
+      // 从数组中移除 - 使用提供的索引或查找索引
+      const coinIndex = index !== undefined ? index : this.coins.indexOf(coin);
+      if (coinIndex !== -1) {
+        this.coins.splice(coinIndex, 1);
+      }
+      
+      // 尝试将金币放入对象池以便重用
+      if (this.coinPool.active) {
+        this.returnCoinToPool(coin);
+      } else {
+        // 如果对象池未启用，则从世界中移除
+        this.World.remove(this.engine.world, coin);
       }
     },
     // 更新顶部障碍物位置的方法
@@ -663,8 +848,19 @@ export default {
     if (this.runner) {
       this.Runner.stop(this.runner)
     }
-    // 清理定时器和缓存
-    this._coinTextureCache = null
+    // 清理所有金币
+    if (this.coins.length > 0) {
+      this.World.remove(this.engine.world, this.coins);
+      this.coins = [];
+    }
+    // 清理对象池
+    if (this.coinPool.objects.length > 0) {
+      this.World.remove(this.engine.world, this.coinPool.objects);
+      this.coinPool.objects = [];
+    }
+    // 清理纹理缓存
+    this.coinPool.textures = {};
+    this._coinTextureCache = null;
   }
 }
 </script>
