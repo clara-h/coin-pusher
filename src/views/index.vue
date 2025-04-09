@@ -1,5 +1,6 @@
 <template>
   <div class="coin-container">
+    <div class="total-value">当前总额: {{ totalValue }}元</div>
     <div class="buttons-container">
       <button @click="DropCoins(5)" class="drop-button">掉落5枚</button>
       <button @click="DropCoins(10)" class="drop-button">掉落10枚</button>
@@ -9,7 +10,6 @@
     <div class="game-area">
       <div ref="coinBox" class="coin-box">
       </div>
-      <div class="total-value">当前总额: {{ totalValue }}元</div>
     </div>
   </div>
 </template>
@@ -1771,10 +1771,8 @@ export default {
 }
 
 .total-value {
-  position: absolute;
-  bottom: 25px;
-  left: 50%;
-  transform: translateX(-50%);
+  position: relative;
+  margin-bottom: 20px;
   background-color: rgba(156, 39, 176, 0.8);
   color: white;
   padding: 8px 16px;
