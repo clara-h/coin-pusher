@@ -2,10 +2,10 @@
   <div class="coin-container">
     <div class="total-value">当前总额: {{ totalValue }}元</div>
     <div class="buttons-container">
-      <button @click="DropCoins(5)" class="drop-button">掉落5枚</button>
-      <button @click="DropCoins(10)" class="drop-button">掉落10枚</button>
-      <button @click="DropCoins(20)" class="drop-button">掉落20枚</button>
-      <button @click="DropCoins(50)" class="drop-button">掉落50枚</button>
+      <button @click="DropCoins(3)" class="drop-button">掉落5枚</button>
+      <button @click="DropCoins(5)" class="drop-button" :disabled="coins.length >= 40">掉落10枚</button>
+      <button @click="DropCoins(10)" class="drop-button" :disabled="coins.length >= 35">掉落15枚</button>
+      <button @click="DropCoins(20)" class="drop-button" :disabled="coins.length >= 26">掉落25枚</button>
     </div>
     <div class="game-area">
       <div ref="coinBox" class="coin-box">
@@ -76,7 +76,8 @@ export default {
       // 缓存纹理
       _coinTextureCache: null,
       // 新增：用于优化纹理预缓存
-      offscreenCoinTextures: {}
+      offscreenCoinTextures: {},
+      MAX_COINS: 40,  // 最大金币数量
     }
   },
   mounted() {
@@ -2336,16 +2337,14 @@ export default {
     
     // 新增：限制总金币数量
     enforceCoinLimit() {
-      const MAX_COINS = 100; // 最大金币数量限制
-      
       // 获取当前有效金币数量
       const activeCoins = this.coins.filter(coin => 
         !coin.plugin || (!coin.plugin.animatingRemoval && !coin.plugin.isRemoved)
       );
       
       // 如果超过限制，移除多余的金币
-      if (activeCoins.length > MAX_COINS) {
-        console.log(`金币数量(${activeCoins.length})超过限制(${MAX_COINS})，开始移除多余金币`);
+      if (activeCoins.length > this.MAX_COINS) {
+        console.log(`金币数量(${activeCoins.length})超过限制(${this.MAX_COINS})，开始移除多余金币`);
         
         // 获取摩擦力板的位置
         const plateTopY = this.movableObstacle?.body?.bounds?.min?.y || 350;
@@ -2358,7 +2357,7 @@ export default {
         });
         
         // 需要移除的金币数量
-        const removeCount = sortedCoins.length - MAX_COINS;
+        const removeCount = sortedCoins.length - this.MAX_COINS;
         
         // 移除多余的金币
         for (let i = 0; i < removeCount; i++) {
@@ -2458,45 +2457,25 @@ export default {
 }
 
 .drop-button {
-  padding: 10px 20px;
-  font-size: 16px;
-  background: linear-gradient(45deg, #4CAF50, #8BC34A);
+  padding: 8px 16px;
+  margin: 0 5px;
+  background-color: #9c27b0;
   color: white;
   border: none;
-  border-radius: 25px;
+  border-radius: 4px;
   cursor: pointer;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-  transition: all 0.3s ease;
-  flex: 1;
-  min-width: 100px;
-  text-align: center;
-}
-
-.drop-button:nth-child(1) {
-  background: linear-gradient(45deg, #2196F3, #03A9F4);
-}
-
-.drop-button:nth-child(2) {
-  background: linear-gradient(45deg, #9C27B0, #673AB7);
-}
-
-.drop-button:nth-child(3) {
-  background: linear-gradient(45deg, #FF9800, #FF5722);
-}
-
-.drop-button:nth-child(4) {
-  background: linear-gradient(45deg, #E91E63, #F44336);
+  font-size: 14px;
+  transition: background-color 0.3s;
 }
 
 .drop-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 8px rgba(0,0,0,0.15);
-  filter: brightness(1.1);
+  background-color: #7b1fa2;
 }
 
-.drop-button:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+.drop-button:disabled {
+  background-color: #b39ddb;
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .game-area {
