@@ -343,6 +343,7 @@ export default {
         
         // 性能优化：分散高消耗操作
         if (timestamp % 2 === 0) { // 每2帧执行一次
+          // 使用合并优化后的方法检查所有金币
           this.checkAllCoins();
         }
         
@@ -564,7 +565,7 @@ export default {
       
       // 限制对象池大小
       if (this.coinPool.objects.length < this.coinPool.maxSize) {
-        this.coinPool.objects.push(coin);
+      this.coinPool.objects.push(coin);
       } else {
         // 如果对象池已满，直接丢弃此金币
         console.log('对象池已满，丢弃金币');
@@ -577,28 +578,6 @@ export default {
       
       // 性能监控：如果帧率过低，减少掉落的金币数量
       let actualCoinCount = coinCount; // 默认使用指定数量
-      
-      // 如果引擎存在且有性能数据
-      if (this.engine && this.engine.timing && this.engine.timing.lastDelta > 0) {
-        const fps = 1000 / this.engine.timing.lastDelta;
-        
-        // 根据帧率调整金币数量
-        if (fps < 30) {
-          // 帧率低时限制最大数量
-          actualCoinCount = Math.min(actualCoinCount, Math.max(5, Math.floor(actualCoinCount * 0.5)));
-          console.log(`帧率低，数量调整为${actualCoinCount}`);
-        } else if (fps < 45) {
-          // 帧率中等时适当限制
-          actualCoinCount = Math.min(actualCoinCount, Math.max(10, Math.floor(actualCoinCount * 0.7)));
-          console.log(`帧率一般，数量调整为${actualCoinCount}`);
-        }
-        
-        // 如果金币总数超过80个，也减少新增数量
-        if (this.coins.length > 80) {
-          actualCoinCount = Math.min(actualCoinCount, Math.max(5, Math.floor(actualCoinCount * 0.4)));
-          console.log(`金币已多，数量调整为${actualCoinCount}`);
-        }
-      }
       
       const coinValues = [1, 5, 10, 25, 50]; // 金币面值
       
@@ -883,7 +862,7 @@ export default {
       });
       
       // 只有当移动距离足够大时才处理碰撞，提高性能
-      if (Math.abs(deltaY) > 0.05) {
+      if (Math.abs(deltaY) > 0.03) {
         // 获取平台的边界信息
         const platformBounds = platform.bounds;
         const platformWidth = platformBounds.max.x - platformBounds.min.x;
@@ -1134,18 +1113,18 @@ export default {
       // 如果金币已经有压力标记，检查是否已经持续足够长时间
       if (coin.plugin && coin.plugin.underPressure) {
         const pressureDuration = Date.now() - coin.plugin.pressureStartTime;
-        // 如果压力状态持续超过500毫秒，保持压力状态
-        if (pressureDuration > 500) {
+        // 降低持续时间要求，使金币更快进入压力状态
+        if (pressureDuration > 300) { // 从500降低到300毫秒
           return true;
         }
       }
       
-      // 检查金币的速度和加速度
+      // 检查金币的速度和加速度 - 降低阈值
       const speed = Math.sqrt(coin.velocity.x * coin.velocity.x + coin.velocity.y * coin.velocity.y);
       const acceleration = Math.sqrt(coin.force.x * coin.force.x + coin.force.y * coin.force.y);
       
-      // 如果速度或加速度超过阈值，认为金币受到较大压力
-      if (speed > 3 || acceleration > 0.01) {
+      // 降低速度和加速度阈值
+      if (speed > 2 || acceleration > 0.008) { // 从3和0.01降低
         return true;
       }
       
@@ -1172,8 +1151,8 @@ export default {
         }
       });
       
-      // 如果金币与3个或更多其他金币接触，或者有金币在顶部，认为受到较大压力
-      return contactCount >= 3 || hasTopCoin;
+      // 降低接触数量要求 - 从3个降低到2个
+      return contactCount >= 2 || hasTopCoin;
     },
     
     // 优化方法：合并多个金币检查到一个遍历中
@@ -1209,18 +1188,19 @@ export default {
         const data = coinData.find(d => d.coin === coin);
         if (!data) continue;
         
-        // 检查金币是否已经穿过摩擦板
-        if (data.coin.position.y > plateTopY + 30) {
+        // 如果金币已经穿过摩擦板（超过顶部即可），直接移除并计入总额
+        if (coin.position.y > plateTopY + 0) { // 只要超过摩擦板就移除
           // 记录金额并添加到总额
-      if (data.coin.value) {
-        this.totalValue += data.coin.value;
-      }
-      
+          if (coin.value) {
+            this.totalValue += coin.value;
+            console.log(`金币(${coin.value})消失，总额增加到${this.totalValue}`);
+          }
+          
           // 标记此金币已被移除
           data.removed = true;
           
           // 移除金币
-          this.removeCoin(data.coin, i);
+          this.removeCoin(coin, i);
         }
       }
       
@@ -1232,41 +1212,59 @@ export default {
         const distToPlate = data.distToPlate;
         const isUnderPressure = pressureMap[coin.id];
         
-        // 应用压力传递和摩擦力调整
-        this.applyPressureAndFriction(coin, distToPlate, isUnderPressure, coinData);
+        // 处理金币摩擦力和压力
+        this.processCoinsPhysics(coin, distToPlate, isUnderPressure, coinData);
       });
     },
     
-    // 新增：将压力传递和摩擦力调整抽取为单独函数
-    applyPressureAndFriction(coin, distToPlate, isUnderPressure, coinData) {
-      // 如果金币在摩擦板附近且受到较大压力
+    // 集成了摩擦力调整和压力传递的方法
+    processCoinsPhysics(coin, distToPlate, isUnderPressure, coinData) {
+      // 1. 摩擦力调整 - 整合了原adjustCoinFriction的逻辑
+      
+      // 如果金币在摩擦板附近且受到较大压力，帮助其穿过摩擦板
       if (distToPlate > -10 && distToPlate < 30 && isUnderPressure) {
-        // 应用向下的力，模拟重力
+        // 增强向下力，使金币更容易穿过摩擦板
         this.Body.applyForce(coin, coin.position, {
           x: 0,
-          y: 0.002 // 向下的力
+          y: 0.008 // 再次增加向下力，确保能穿过
         });
         
-        // 允许金币穿过摩擦板
-        if (distToPlate < 5) {
+        // 降低阈值，使金币更容易进入穿透模式
+        if (distToPlate < 15) { // 检测范围15像素
+          // 设置特殊碰撞过滤器，允许穿过摩擦板
           coin.collisionFilter = {
             category: 0x0001,
-            mask: 0x0001
+            mask: 0x0001 // 只与金币碰撞，不与摩擦板碰撞
           };
+          
+          // 近乎无摩擦力状态
+          this.Body.set(coin, {
+            friction: 0.0001,
+            frictionAir: 0.0001,
+            frictionStatic: 0.0001,
+            restitution: 0.01,
+            slop: 0.5 // 进一步增加允许重叠量
+          });
           
           coin.plugin = coin.plugin || {};
           coin.plugin.canPassThroughPlate = true;
+          
+          // 直接给一个向下的速度脉冲
+          this.Body.setVelocity(coin, {
+            x: coin.velocity.x,
+            y: Math.max(coin.velocity.y, 5) // 确保足够的下落速度
+          });
         }
       }
       
-      // 动态调整金币摩擦力
+      // 2. 动态调整所有金币的摩擦力和物理特性
       if (distToPlate > -30 && distToPlate < 100) {
-        // 计算摩擦力系数
+        // 根据距离计算动态参数
         const frictionFactor = Math.max(0.1, Math.min(1.5, 1.5 - (distToPlate / 100)));
         const massReductionFactor = Math.max(0.2, Math.min(1.0, 1.0 - (100 - distToPlate) / 130));
         const restitutionFactor = Math.max(0.01, Math.min(0.05, 0.01 + distToPlate / 2000));
         
-        // 批量设置属性，减少 Body.set 调用次数
+        // 设置基本物理特性
         const properties = {
           friction: frictionFactor,
           frictionAir: 0.5 * frictionFactor,
@@ -1274,45 +1272,92 @@ export default {
           restitution: restitutionFactor
         };
         
-        // 添加特殊处理
+        // 特殊处理：受压状态下，几乎无摩擦力
         if (isUnderPressure && distToPlate < 20) {
-          // 压力状态的属性
           Object.assign(properties, {
-            friction: 0.01,
-            frictionAir: 0.01,
-            frictionStatic: 0.01,
-            mass: 0.1
+            friction: 0.001,
+            frictionAir: 0.001,
+            frictionStatic: 0.001,
+            mass: 0.05, // 降低质量使其更容易被推动
+            slop: 0.3   // 增加允许重叠量
           });
           
-          // 标记压力状态
+          // 标记金币处于压力状态
           coin.plugin = coin.plugin || {};
           coin.plugin.underPressure = true;
           coin.plugin.pressureStartTime = Date.now();
           
-          // 应用额外向下力
+          // 额外的向下力
           this.Body.applyForce(coin, coin.position, {
             x: 0,
-            y: 0.002
+            y: 0.005 // 向下的力比普通状态更大
           });
         } else {
-          // 正常状态的额外属性
+          // 普通状态额外特性
           Object.assign(properties, {
             mass: 0.1 * massReductionFactor,
             inverseInertia: 0.1 / massReductionFactor
           });
           
-          // 标记为已调整摩擦力
+          // 标记为调整了摩擦力
           coin.plugin = coin.plugin || {};
           coin.plugin.frictionAdjusted = true;
         }
         
-        // 一次性设置所有属性，减少 API 调用
+        // 一次性设置所有特性
         this.Body.set(coin, properties);
+        
+      } else if (coin.plugin && coin.plugin.frictionAdjusted) {
+        // 离开摩擦板区域，恢复默认特性
+        this.Body.set(coin, {
+          friction: 1.5,
+          frictionAir: 0.5,
+          frictionStatic: 1.5,
+          restitution: 0.01,
+          mass: 0.1,
+          inverseInertia: 0,
+          slop: 0.05,
+          timeScale: 1.0
+        });
+        
+        // 移除标记
+        delete coin.plugin.frictionAdjusted;
       }
       
-      // 增强金币之间的压力传递
+      // 3. 处理已穿过摩擦板的金币
+      if (distToPlate > 0) {
+        // 确保重置碰撞过滤器
+        if (coin.plugin && coin.plugin.canPassThroughPlate) {
+          coin.collisionFilter = {
+            category: 0x0001,
+            mask: 0xFFFFFFFF
+          };
+          delete coin.plugin.canPassThroughPlate;
+        }
+        
+        // 额外下落重力 - 加速金币离开屏幕
+        const gravityFactor = Math.min(0.01, 0.002 + distToPlate / 500);
+        this.Body.applyForce(coin, coin.position, {
+          x: 0,
+          y: gravityFactor
+        });
+        
+        // 确保一定的下落速度
+        if (distToPlate > 10 && coin.velocity.y < 3) {
+          this.Body.setVelocity(coin, {
+            x: coin.velocity.x,
+            y: Math.max(3, coin.velocity.y)
+          });
+          
+          // 标记为快速下落
+          coin.plugin = coin.plugin || {};
+          coin.plugin.fastDropping = true;
+        }
+      }
+      
+      // 4. 压力传递到下方金币
       if (isUnderPressure) {
-        // 使用已计算的 coinData 查找下方的金币，避免重新计算位置
+        // 查找当前金币下方的金币
         const bottomCoins = coinData
           .filter(data => 
             data.coin !== coin && 
@@ -1322,33 +1367,40 @@ export default {
           )
           .map(data => data.coin);
         
-        // 批量处理下方金币
+        // 处理下方金币
         if (bottomCoins.length > 0) {
           bottomCoins.forEach(bottomCoin => {
             const distY = bottomCoin.position.y - coin.position.y;
             const pressureFactor = Math.max(0.1, Math.min(1.0, 1.0 - distY / 100));
             
-            // 应用向下力
+            // 向下力的传递
             this.Body.applyForce(bottomCoin, bottomCoin.position, {
               x: 0,
-              y: 0.001 * pressureFactor
+              y: 0.002 * pressureFactor // 增加传递的力量
             });
             
-            // 设置摩擦力
+            // 降低摩擦力，使其更容易移动
             this.Body.set(bottomCoin, {
-              friction: Math.max(0.1, bottomCoin.friction * 0.8),
-              frictionAir: Math.max(0.1, bottomCoin.frictionAir * 0.8),
-              frictionStatic: Math.max(0.1, bottomCoin.frictionStatic * 0.8)
+              friction: Math.max(0.05, bottomCoin.friction * 0.7),
+              frictionAir: Math.max(0.05, bottomCoin.frictionAir * 0.7),
+              frictionStatic: Math.max(0.05, bottomCoin.frictionStatic * 0.7)
             });
             
-            // 标记压力传递
+            // 标记受到压力传递
             bottomCoin.plugin = bottomCoin.plugin || {};
             bottomCoin.plugin.pressureTransferred = true;
             bottomCoin.plugin.pressureSource = coin.id;
           });
         }
       }
+      
+      // 5. 处理压力状态清除
+      if (coin.plugin && coin.plugin.underPressure && distToPlate > 30) {
+        delete coin.plugin.underPressure;
+        delete coin.plugin.pressureStartTime;
+      }
     },
+    
     // 新增：执行内存清理，防止内存泄漏
     performMemoryCleanup() {
       // 如果游戏中有超过100个金币，强制移除一些最老的金币
@@ -1369,6 +1421,34 @@ export default {
         // 检查金币是否有效
         if (!coin || !coin.position || typeof coin.position.x !== 'number') {
           this.coins.splice(i, 1);
+        }
+      }
+      
+      // 检查是否有金币超过了摩擦板但未被移除
+      if (this.movableObstacle && this.movableObstacle.body) {
+        const plateTopY = this.movableObstacle.body.bounds.min.y;
+        
+        for (let i = this.coins.length - 1; i >= 0; i--) {
+          const coin = this.coins[i];
+          
+          // 检查金币是否已经超过摩擦板但未被移除
+          if (coin.position.y > plateTopY + 5) {
+            console.log(`清理：发现超过摩擦板的金币(${coin.value})，强制移除`);
+            
+            // 记录金额并添加到总额
+      if (coin.value) {
+        this.totalValue += coin.value;
+      }
+      
+            // 移除金币
+            this.removeCoin(coin, i);
+          }
+          
+          // 额外检查：如果金币Y坐标超过游戏区域，也强制移除
+          if (coin.position.y > 450) { // 超出游戏区域底部
+            console.log(`清理：发现超出游戏区域的金币，强制移除`);
+            this.removeCoin(coin, i);
+          }
         }
       }
     },
