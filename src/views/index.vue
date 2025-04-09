@@ -3,7 +3,7 @@
     <div class="total-value">当前总额: {{ totalValue }}元</div>
     <div class="buttons-container">
       <button @click="DropCoins(3)" class="drop-button">掉落5枚</button>
-      <button @click="DropCoins(5)" class="drop-button" :disabled="coins.length >= 40">掉落10枚</button>
+      <button @click="DropCoins(5)" class="drop-button" :disabled="coins.length >= 50">掉落10枚</button>
       <button @click="DropCoins(10)" class="drop-button" :disabled="coins.length >= 35">掉落15枚</button>
       <button @click="DropCoins(20)" class="drop-button" :disabled="coins.length >= 26">掉落25枚</button>
     </div>
@@ -1168,6 +1168,40 @@ export default {
         max: { x: platformBounds.max.x + 5, y: platformBounds.max.y + 35 }
       };
       
+      // 创建一个集合来存储已经处理过的金币
+      const processedCoins = new Set();
+      
+      // 递归函数：传递力给下方的金币
+      const applyForceToBelowCoins = (coin, force, depth = 0) => {
+        if (depth > 8) return; // 限制递归深度
+        
+        // 查找下方的金币
+        this.coins.forEach(belowCoin => {
+          if (processedCoins.has(belowCoin)) return;
+          
+          // 计算金币之间的距离
+          const distX = Math.abs(coin.position.x - belowCoin.position.x);
+          const distY = belowCoin.position.y - coin.position.y;
+          
+          // 如果金币在下方且距离合适
+          if (distY > 0 && distY < 20 && distX < 20) {
+            processedCoins.add(belowCoin);
+            
+            // 应用递减的力
+            const reducedForce = {
+              x: force.x * 0.2,
+              y: force.y * 0.2
+            };
+            
+            // 应用力
+            this.Body.applyForce(belowCoin, belowCoin.position, reducedForce);
+            
+            // 递归处理更下方的金币
+            applyForceToBelowCoins(belowCoin, reducedForce, depth + 1);
+          }
+        });
+      };
+      
       this.coins.forEach(coin => {
         // 检查金币是否在扩展区域内但尚未被处理
         if (coin.position.x >= extendedRegion.min.x && 
@@ -1186,17 +1220,20 @@ export default {
           if (distX < platformWidth / 2 && distY > 0 && distY < 20) {
             // 只在平台向下移动时应用推力
             if (platform.customData.direction > 0) {
-              // 弱推力效果
-              this.Body.applyForce(coin, coin.position, {
+              // 初始推力
+              const initialForce = {
                 x: 0,
-                y: 0.0005
-              });
+                y: 0.0008
+              };
               
-              // 弱位置调整
-              this.Body.setPosition(coin, {
-                x: coin.position.x,
-                y: coin.position.y + 0.3
-              });
+              // 应用初始力
+              this.Body.applyForce(coin, coin.position, initialForce);
+              
+              // 标记金币已被处理
+              processedCoins.add(coin);
+              
+              // 开始力的传递
+              applyForceToBelowCoins(coin, initialForce);
             }
           }
         }
@@ -1262,85 +1299,58 @@ export default {
     
     // 优化方法：合并多个金币检查到一个遍历中
     checkAllCoins() {
-      // 获取底部摩擦板的位置
-      const bottomFrictionPlate = this.movableObstacle.body;
-      if (!bottomFrictionPlate) return;
+      const plateTopY = this.plateTopY;
+      const plateBottomY = this.plateBottomY;
       
-      const plateBounds = bottomFrictionPlate.bounds;
-      const plateTopY = plateBounds.min.y;
+      // 检查金币数量是否超过限制
+      const isOverLimit = this.coins.length > this.MAX_COINS;
       
-      // 获取推板位置
-      const platform = this.platformMotion.platform;
-      const platformBounds = platform?.bounds;
+      // 如果超过限制，计算需要调整的金币数量
+      const excessCoins = isOverLimit ? this.coins.length - this.MAX_COINS : 0;
       
-      // 批量处理：一次计算，多次使用
-      const coinData = this.coins.map(coin => {
-        // 检查是否被推板碰撞
-        const isHitByPlatform = platformBounds && 
-          coin.position.x >= platformBounds.min.x && 
-          coin.position.x <= platformBounds.max.x && 
-          coin.position.y >= platformBounds.min.y && 
-          coin.position.y <= platformBounds.max.y &&
-          platform.customData?.direction > 0; // 推板向下移动
-        
-        return {
-          coin,
-          distToPlate: coin.position.y - plateTopY,
-          position: { ...coin.position },
-          removed: false,
-          isHitByPlatform
-        };
-      });
+      // 计算摩擦力调整系数（金币越多，摩擦力越小）
+      const frictionFactor = isOverLimit ? Math.max(0.1, 1 - (excessCoins * 0.02)) : 1;
       
-      // 批量处理: 检查压力状态
-      const pressureMap = {};
-      coinData.forEach(data => {
-        if (!data.removed) {
-          pressureMap[data.coin.id] = this.checkCoinPressure(data.coin);
-        }
-      });
-      
-      // 先处理穿过摩擦板的金币（从后向前处理，避免索引问题）
+      // 批量处理金币
       for (let i = this.coins.length - 1; i >= 0; i--) {
-            const coin = this.coins[i];
-        const data = coinData[i];
+        const coin = this.coins[i];
         
-        // 跳过正在动画或已移除的金币
-        if (coin.plugin && (coin.plugin.animatingRemoval || coin.plugin.isRemoved)) {
+        // 检查金币是否超出边界
+        if (coin.position.y > plateBottomY + 50) {
+          this.removeCoin(coin);
           continue;
         }
         
-        // 检查金币是否已经超过摩擦板
-        if (data.distToPlate > 0) {
-          // 只有在被推板碰撞时才触发穿透效果
-          if (data.isHitByPlatform) {
-            // 开始金币消失动画
-            this.startCoinRemovalAnimation(coin);
-            
-            // 记录金额并添加到总额
-            if (coin.value) {
-              this.totalValue += coin.value;
-              console.log(`金币(${coin.value})穿过摩擦板，总额增加到${this.totalValue}`);
-            }
-            
-            // 标记此金币已被移除
-            data.removed = true;
+        // 如果金币数量超过限制，调整金币的物理属性
+        if (isOverLimit) {
+          // 调整摩擦力
+          coin.friction = 0.1 * frictionFactor;
+          coin.frictionAir = 0.01 * frictionFactor;
+          
+          // 如果金币在摩擦板上方，增加向下的力
+          if (coin.position.y < plateTopY) {
+            this.Body.applyForce(coin, coin.position, {
+              x: 0,
+              y: 0.001 * excessCoins // 金币越多，向下的力越大
+            });
           }
-          continue; // 此金币已处理（移除或正在动画），跳过后续检查
+        }
+        
+        // 原有的压力检测逻辑
+        if (coin.plugin && coin.plugin.underPressure) {
+          // 如果金币受到压力，减少摩擦力
+          coin.friction = 0.1;
+          coin.frictionAir = 0.01;
+          
+          // 如果金币在摩擦板上方，增加向下的力
+          if (coin.position.y < plateTopY) {
+            this.Body.applyForce(coin, coin.position, {
+              x: 0,
+              y: 0.001
+            });
+          }
         }
       }
-      
-      // 处理其他金币特性（仅处理未移除的金币）
-      coinData.forEach(data => {
-        if (data.removed) return;
-        
-        const coin = data.coin;
-        const distToPlate = data.distToPlate;
-        const isUnderPressure = pressureMap[coin.id];
-        
-        // 处理金币摩擦力和压力
-        this.processCoinsPhysics(coin, distToPlate, isUnderPressure, coinData);
-      });
     },
     
     // 集成了摩擦力调整和压力传递的方法
