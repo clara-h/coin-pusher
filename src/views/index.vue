@@ -327,6 +327,9 @@ export default {
         // 每帧执行的操作
         this.updatePlatformPosition();
         
+        // 更新正在掉落的金币动画
+        this.updateDroppingCoins();
+        
         // 性能优化：分散高消耗操作
         if (timestamp % 2 === 0) { // 每2帧执行一次
           // 使用合并优化后的方法检查所有金币
@@ -614,18 +617,23 @@ export default {
           dropY = this.platformMotion.platform.bounds.max.y + 23; // 金币半径+一点空间
         }
         
+        // 开始高于实际掉落位置，以便有掉落动画
+        const startY = dropY - 80; // 开始位置高80像素，便于动画
+        
         // 创建位置、角度和速度，增加随机性避免堆叠
         const position = {
           x: this.getRandomInt(this.dropArea.minX, this.dropArea.maxX),
-          y: dropY + this.getRandomInt(-2, 2) // 微小随机，避免完全重叠
+          y: startY // 从高处开始掉落
         };
         const angle = Math.random() * Math.PI * 2;
+        // 初始速度设为0，会在动画中逐渐增加
         const velocity = {
-          x: (Math.random() - 0.5) * 5,
-          y: Math.random() * 2 + 1
+          x: 0,
+          y: 0
         };
         
-        coinDataList.push({ value, position, angle, velocity });
+        const targetY = dropY + this.getRandomInt(-2, 2); // 最终目标位置
+        coinDataList.push({ value, position, angle, velocity, targetY });
       }
       
       // 使用递归函数处理金币掉落
@@ -643,12 +651,16 @@ export default {
           this.Body.setPosition(coin, data.position);
           this.Body.setAngle(coin, data.angle);
           this.Body.set(coin, {
-            restitution: 0.01,
-            friction: 1.5,
-            frictionAir: 0.5,
-            frictionStatic: 1.5,
-            density: 0.2,
-            plugin: {}
+            restitution: 0.3, // 增加弹性，使碰撞更明显
+            friction: 1.0,    // 降低摩擦力，使滑动更自然
+            frictionAir: 0.05, // 降低空气阻力，使下落更快
+            frictionStatic: 0.8, // 降低静摩擦力
+            density: 0.3,     // 增加密度，使冲击力更强
+            plugin: {
+              isDropping: true, // 标记为正在掉落
+              dropStartTime: Date.now(),
+              targetY: data.targetY
+            }
           });
           
           // 存储半径信息
@@ -666,13 +678,13 @@ export default {
           // 创建新的金币 - 使用预缓存的纹理
           coin = this.Bodies.circle(data.position.x, data.position.y, coinRadius, {
             angle: data.angle,
-            restitution: 0.01,
-            friction: 1.5,
-            frictionAir: 0.5,
-            frictionStatic: 1.5,
-            density: 0.2,
+            restitution: 0.3, // 增加弹性，使碰撞更明显
+            friction: 1.0,    // 降低摩擦力，使滑动更自然
+            frictionAir: 0.05, // 降低空气阻力，使下落更快
+            frictionStatic: 0.8, // 降低静摩擦力
+            density: 0.3,     // 增加密度，使冲击力更强
             chamfer: { radius: 2 },
-            mass: 0.2, // 金币质量
+            mass: 0.3, // 增加质量，使冲击力更强
             inertia: Infinity,
             inverseInertia: 0,
             render: {
@@ -688,7 +700,10 @@ export default {
             slop: 0.05,
             value: data.value,
             plugin: {
-              isCoin: true // 标记为金币，便于碰撞检测
+              isCoin: true, // 标记为金币，便于碰撞检测
+              isDropping: true, // 标记为正在掉落
+              dropStartTime: Date.now(),
+              targetY: data.targetY
             }
           });
           
@@ -696,8 +711,8 @@ export default {
           coin.circleRadius = coinRadius;
         }
         
-        // 设置初始速度和角速度
-        this.Body.setVelocity(coin, data.velocity);
+        // 设置初始速度和角速度 - 起始为0
+        this.Body.setVelocity(coin, { x: 0, y: 0 });
         this.Body.setAngularVelocity(coin, 0);
         
         // 添加到世界和活动金币数组
@@ -706,15 +721,147 @@ export default {
         }
         this.coins.push(coin);
         
-        // 新增：立即检查周围是否有其他金币，并施加推力
-        this.applyRepulsionForces(coin);
-        
         // 递归调用下一个金币掉落
         setTimeout(() => dropCoin(index + 1), dropInterval);
       };
       
       // 开始掉落第一个金币
       dropCoin(0);
+    },
+    
+    // 新增：应用金币掉落动画
+    updateDroppingCoins() {
+      if (this.coins.length === 0) return;
+      
+      const now = Date.now();
+      const droppingCoins = this.coins.filter(coin => coin.plugin && coin.plugin.isDropping);
+      
+      droppingCoins.forEach(coin => {
+        const dropDuration = 500; // 掉落动画持续500毫秒
+        const elapsedTime = now - coin.plugin.dropStartTime;
+        
+        if (elapsedTime >= dropDuration) {
+          // 动画完成，移除掉落标记
+          delete coin.plugin.isDropping;
+          delete coin.plugin.dropStartTime;
+          
+          // 应用最终速度和冲击力
+          const impactVelocity = {
+            x: (Math.random() - 0.5) * 5, // 随机横向速度
+            y: 5 + Math.random() * 3 // 较大的向下速度
+          };
+          this.Body.setVelocity(coin, impactVelocity);
+          
+          // 添加旋转
+          this.Body.setAngularVelocity(coin, (Math.random() - 0.5) * 0.2);
+          
+          // 应用冲击力到周围的金币
+          this.applyImpactForce(coin);
+          
+          return;
+        }
+        
+        // 计算动画进度 (0-1)
+        const progress = Math.min(1, elapsedTime / dropDuration);
+        
+        // 使用缓动函数使动画更自然
+        const easedProgress = this.easeInOutCubic(progress);
+        
+        // 计算当前位置 - 从开始位置到目标位置的平滑过渡
+        const currentY = coin.position.y + (coin.plugin.targetY - coin.position.y) * easedProgress;
+        
+        // 更新位置
+        this.Body.setPosition(coin, {
+          x: coin.position.x,
+          y: currentY
+        });
+        
+        // 根据进度增加下落速度
+        const currentVelocity = {
+          x: (Math.random() - 0.5) * progress * 2, // 随机横向速度，逐渐增加
+          y: progress * 3 // 下落速度，逐渐增加
+        };
+        this.Body.setVelocity(coin, currentVelocity);
+        
+        // 添加微小旋转，随进度增加
+        this.Body.setAngularVelocity(coin, (Math.random() - 0.5) * 0.05 * progress);
+      });
+    },
+    
+    // 辅助方法：缓动函数，使动画更自然
+    easeInOutCubic(t) {
+      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    },
+    
+    // 新增：应用冲击力到周围的金币
+    applyImpactForce(impactCoin) {
+      // 冲击力参数
+      const impactRadius = 70;  // 冲击力作用半径
+      const baseImpactForce = 0.03;  // 基础冲击力大小
+      
+      // 遍历所有金币，找出在冲击半径内的金币
+      this.coins.forEach(targetCoin => {
+        // 排除自身和正在掉落的金币
+        if (targetCoin === impactCoin || (targetCoin.plugin && targetCoin.plugin.isDropping)) return;
+        
+        // 计算与冲击金币的距离
+        const dx = targetCoin.position.x - impactCoin.position.x;
+        const dy = targetCoin.position.y - impactCoin.position.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // 如果在冲击半径内，应用冲击力
+        if (distance < impactRadius) {
+          // 冲击力随距离减小
+          const forceMagnitude = baseImpactForce * (1 - distance / impactRadius);
+          
+          // 计算力的方向
+          const normalizedDx = dx / distance || 0;  // 防止除以零
+          const normalizedDy = dy / distance || 0;
+          
+          // 对目标金币施加冲击力 - 主要为向下和较小的横向力
+          this.Body.applyForce(targetCoin, targetCoin.position, {
+            x: normalizedDx * forceMagnitude * 0.5, // 横向力较小
+            y: Math.max(0, normalizedDy) * forceMagnitude * 1.5 + 0.01 // 确保有向下分量
+          });
+          
+          // 直接增加目标金币的速度
+          const currentVelocity = targetCoin.velocity;
+          const newVelocity = {
+            x: currentVelocity.x + normalizedDx * forceMagnitude * 10,
+            y: currentVelocity.y + Math.max(0, normalizedDy) * forceMagnitude * 15 + 0.5
+          };
+          this.Body.setVelocity(targetCoin, newVelocity);
+          
+          // 添加旋转
+          this.Body.setAngularVelocity(targetCoin, targetCoin.angularVelocity + (Math.random() - 0.5) * 0.1);
+          
+          // 标记为受到冲击
+          targetCoin.plugin = targetCoin.plugin || {};
+          targetCoin.plugin.impacted = true;
+          
+          // 降低受冲击金币的摩擦力，使其更容易移动
+          this.Body.set(targetCoin, {
+            friction: 0.5,           // 降低摩擦力
+            frictionAir: 0.2,        // 降低空气阻力
+            frictionStatic: 0.5      // 降低静摩擦力
+          });
+          
+          // 1秒后恢复正常摩擦力
+          setTimeout(() => {
+            if (targetCoin && targetCoin.plugin) {
+              this.Body.set(targetCoin, {
+                friction: 1.5,
+                frictionAir: 0.5,
+                frictionStatic: 1.5
+              });
+              delete targetCoin.plugin.impacted;
+            }
+          }, 1000);
+        }
+      });
+      
+      // 播放冲击音效
+      this.playCollisionSound();
     },
     
     // 新增：应用排斥力，避免金币堆叠
@@ -777,7 +924,7 @@ export default {
           });
           
           // 1秒后恢复正常摩擦力
-      setTimeout(() => {
+          setTimeout(() => {
             if (existingCoin && existingCoin.plugin) {
               this.Body.set(existingCoin, {
                 friction: 1.5,
