@@ -330,6 +330,12 @@ export default {
         // 更新正在掉落的金币动画
         this.updateDroppingCoins();
         
+        // 更新金币穿过摩擦力板的状态
+        this.updateCoinPassThroughStatus();
+        
+        // 根据金币总数动态调整摩擦力板效果
+        this.adjustCoinPassThroughRate();
+        
         // 性能优化：分散高消耗操作
         if (timestamp % 2 === 0) { // 每2帧执行一次
           // 使用合并优化后的方法检查所有金币
@@ -339,6 +345,9 @@ export default {
         // 降低堆叠检测频率，每10帧检查一次
         if (timestamp % 10 === 0) {
           this.checkCoinStacking();
+          
+          // 限制总金币数量，防止过多卡死
+          this.enforceCoinLimit();
         }
         
         // 处理平台对刚刚脱离接触的金币的额外推动力 - 确保金币被顺利推动
@@ -1375,7 +1384,7 @@ export default {
             this.playCoinDropSound();
           } else {
             // 金币正在执行掉落动画，检查是否完成
-            const now = Date.now();
+      const now = Date.now();
             const elapsedTime = now - coin.plugin.removalStartTime;
             const duration = coin.plugin.removalAnimationDuration || 1000;
             
@@ -1422,13 +1431,6 @@ export default {
       // 处理其他金币特性（仅处理未移除的金币）
       coinData.forEach(data => {
         if (data.removed) return;
-        
-        const coin = data.coin;
-        const distToPlate = data.distToPlate;
-        const isUnderPressure = pressureMap[coin.id];
-        
-        // 处理金币摩擦力和压力
-        this.processCoinsPhysics(coin, distToPlate, isUnderPressure, coinData);
       });
     },
     
@@ -1642,7 +1644,7 @@ export default {
       
       // 检查并清理无效的物理对象
       for (let i = this.coins.length - 1; i >= 0; i--) {
-        const coin = this.coins[i];
+          const coin = this.coins[i];
         // 检查金币是否有效
         if (!coin || !coin.position || typeof coin.position.x !== 'number') {
           this.coins.splice(i, 1);
@@ -1725,10 +1727,11 @@ export default {
     // 新增：更新金币移除动画
     updateRemovalAnimations() {
       const now = Date.now();
-      const coinsToRemove = [];
       
       // 遍历所有金币，更新动画状态
-      this.coins.forEach((coin, index) => {
+      for (let i = this.coins.length - 1; i >= 0; i--) {
+            const coin = this.coins[i];
+        
         if (coin.plugin && coin.plugin.animatingRemoval) {
           const elapsedTime = now - coin.plugin.removalStartTime;
           const duration = coin.plugin.removalAnimationDuration || 600;
@@ -1736,70 +1739,64 @@ export default {
           // 动画进度 (0-1)
           const progress = Math.min(1, elapsedTime / duration);
           
-          // 如果动画已完成，准备移除
+          // 如果动画已完成，移除金币
           if (progress >= 1) {
-            coinsToRemove.push({ coin, index });
-          } else {
-            // 平滑过渡的渐变效果
-            const easeOutProgress = 1 - Math.pow(1 - progress, 2); // 缓出效果
+            // 从物理世界和金币数组中移除
+            this.World.remove(this.engine.world, coin);
+            this.coins.splice(i, 1);
+            continue;
+          }
+          
+          // 动画还在进行中，更新视觉效果
+          // 使用缓动函数使动画更自然
+          const easedProgress = this.easeOutQuad(progress);
+          
+          // 应用缩放和透明度效果
+          if (coin.render && coin.render.sprite) {
+            const originalScale = coin.plugin.originalRender?.xScale || 1.5;
             
-            // 更新视觉效果 - 确保使用统一的缩放比例
-            if (coin.render && coin.render.sprite) {
-              const originalScale = 1.5; // 使用固定的缩放比例
-              // 先放大后缩小的效果
-              let scale;
-              if (progress < 0.3) {
-                // 前30%时间，放大到115%
-                scale = originalScale * (1 + (progress/0.3) * 0.15);
-              } else {
-                // 后70%时间，从115%缩小到60%
-                scale = originalScale * (1.15 - ((progress-0.3)/0.7) * 0.55);
-              }
-              
-              // 应用缩放
-              coin.render.sprite.xScale = scale;
-              coin.render.sprite.yScale = scale;
-              
-              // 透明度变化 - 保持到50%进度，然后开始淡出
-              coin.render.opacity = progress < 0.5 ? 1 : 1 - ((progress - 0.5) / 0.5);
+            // 缩放效果：先稍微放大，然后迅速缩小
+            let scale;
+            if (progress < 0.2) {
+              // 前20%时间放大到110%
+              scale = originalScale * (1 + progress * 0.1);
+            } else {
+              // 后80%时间从110%缩小到0
+              scale = originalScale * (1.1 - ((progress - 0.2) / 0.8) * 1.1);
             }
             
-            // 更新物理效果 - 根据进度调整
-            const verticalVelocity = 5 + easeOutProgress * 10; // 逐渐加速
-            this.Body.setVelocity(coin, {
-              x: (Math.sin(progress * 5) * 0.5) + (coin.velocity.x * 0.95), // 微小的横向摆动
-              y: verticalVelocity
-            });
+            // 应用缩放
+            coin.render.sprite.xScale = scale;
+            coin.render.sprite.yScale = scale;
             
-            // 统一的旋转效果
-            const rotationSpeed = 0.03 + easeOutProgress * 0.07;
+            // 透明度效果：逐渐变透明
+            coin.render.opacity = 1 - easedProgress * 0.9; // 最低保留10%不透明度
             
-            // 随机方向旋转
-            const direction = coin.plugin.rotationDirection || 
-                             (coin.plugin.rotationDirection = Math.random() > 0.5 ? 1 : -1);
-            this.Body.setAngularVelocity(coin, rotationSpeed * direction);
-            
-            // 随机小跳动效果 - 概率较低以优化性能
-            if (Math.random() > 0.95) {
-              this.Body.applyForce(coin, coin.position, {
-                x: (Math.random() - 0.5) * 0.001,
-                y: -0.003 * Math.random()
-              });
+            // 可选：添加颜色效果，如闪光或颜色变化
+            if (progress > 0.5 && !coin.render.sprite.tint) {
+              // 添加一些金色闪光效果
+              coin.render.sprite.tint = '#FFD700';
             }
           }
+          
+          // 应用物理效果 - 加速下落
+          const currentVelocity = {
+            x: coin.velocity.x,
+            y: coin.velocity.y + 0.1 // 逐渐增加下落速度
+          };
+          this.Body.setVelocity(coin, currentVelocity);
+          
+          // 增加旋转速度
+          const currentAngularVelocity = coin.angularVelocity + 
+                                        (Math.random() - 0.5) * 0.01 * progress;
+          this.Body.setAngularVelocity(coin, currentAngularVelocity);
         }
-      });
-      
-      // 移除所有完成动画的金币
-      coinsToRemove.forEach(({ coin, index }) => {
-        // 添加到总额
-      if (coin.value) {
-        this.totalValue += coin.value;
       }
-      
-        // 移除金币
-        this.removeCoin(coin, index);
-      });
+    },
+    
+    // 辅助方法：缓出二次方缓动函数
+    easeOutQuad(t) {
+      return t * (2 - t);
     },
     
     // 新增：检查金币的堆叠情况
@@ -1833,7 +1830,7 @@ export default {
       
       // 对需要移动的金币按堆叠层数从高到低排序，优先处理最底层的金币
       coinsToMove.sort((a, b) => b.stackLayers - a.stackLayers);
-      
+
       // 处理需要移动的金币
       coinsToMove.forEach(({ coin }) => {
         // 应用向下移动的力
@@ -1922,7 +1919,7 @@ export default {
         return true;
       });
     },
-    
+
     // 对需要移动的金币应用向下力
     applyStackingForce(coin) {
       // 如果金币已经有下落标记，不再重复应用力
@@ -1936,7 +1933,7 @@ export default {
       }
       
       // 标记金币正在受到堆叠力
-      coin.plugin = coin.plugin || {};
+            coin.plugin = coin.plugin || {};
       coin.plugin.stackingForceApplied = true;
       coin.plugin.stackingForceTime = Date.now();
       
@@ -1947,7 +1944,7 @@ export default {
       const forceY = forceMagnitude; // 主要向下分量
       
       // 应用堆叠下落力
-      this.Body.applyForce(coin, coin.position, {
+            this.Body.applyForce(coin, coin.position, {
         x: forceX,
         y: forceY
       });
@@ -1986,7 +1983,7 @@ export default {
       this.propagateStackingForce(coin, forceMagnitude, 1);
       
       // 0.5秒后恢复正常摩擦力
-      setTimeout(() => {
+            setTimeout(() => {
         if (coin && coin.plugin && coin.plugin.originalFriction) {
           this.Body.set(coin, coin.plugin.originalFriction);
           delete coin.plugin.originalFriction;
@@ -1998,60 +1995,53 @@ export default {
         }
         
         // 1秒后移除堆叠力标记，允许重新应用
-        setTimeout(() => {
+              setTimeout(() => {
           if (coin && coin.plugin) {
             delete coin.plugin.stackingForceApplied;
-          }
-        }, 500);
+                }
+            }, 500);
       }, 500);
     },
-    
+
     // 新增：传播堆叠力到下方金币
     propagateStackingForce(sourceCoin, initialForceMagnitude, depth) {
       // 限制传播深度，避免过度传播
       if (depth > 5) return;
-      
+
       // 找到下方受影响的金币
       const belowCoins = this.findDirectlyBelowCoins(sourceCoin);
       if (belowCoins.length === 0) return;
-      
+
       // 计算每个下方金币接收的力
       // 力随着传播深度减弱
       const forceDampingFactor = 0.8; // 每层减弱20%
       const propagatedForceMagnitude = initialForceMagnitude * Math.pow(forceDampingFactor, depth);
-      
+
       // 力大小低于阈值时停止传播
       if (propagatedForceMagnitude < 0.001) return;
-      
       // 对每个下方金币应用力并继续传播
       belowCoins.forEach(belowCoin => {
         // 排除已经在传播力的金币，避免循环
         if (belowCoin.plugin && belowCoin.plugin.propagatingForce) return;
-        
         // 计算相对位置确定力的方向
         const dx = belowCoin.position.x - sourceCoin.position.x;
         const dy = belowCoin.position.y - sourceCoin.position.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
-        
         // 力的方向 - 主要向下，但保留一些水平分量
         const normalizedDx = dx / distance || 0; // 防止除以零
         const normalizedDy = dy / distance || 0;
-        
         // 应用力 - 力的大小会随着传播距离减弱
         const forceX = normalizedDx * propagatedForceMagnitude * 0.3; // 水平分量较小
         const forceY = Math.max(0.3, normalizedDy) * propagatedForceMagnitude; // 垂直分量保证向下
-        
         this.Body.applyForce(belowCoin, belowCoin.position, {
           x: forceX,
           y: forceY
         });
-        
         // 给下层金币一个速度脉冲，确保移动
         const velocityImpulse = {
           x: normalizedDx * propagatedForceMagnitude * 50,
           y: Math.max(0.3, normalizedDy) * propagatedForceMagnitude * 80
         };
-        
         this.Body.setVelocity(belowCoin, {
           x: belowCoin.velocity.x + velocityImpulse.x,
           y: belowCoin.velocity.y + velocityImpulse.y
@@ -2071,18 +2061,15 @@ export default {
         belowCoin.plugin.stackingForcePropagated = true;
         belowCoin.plugin.originalFriction = originalFriction;
         belowCoin.plugin.propagatingForce = true;
-        
         this.Body.set(belowCoin, {
           friction: 0.3,           // 降低摩擦力
           frictionAir: 0.1,        // 降低空气阻力
           frictionStatic: 0.2      // 降低静摩擦力
         });
-        
         // 继续向下传播力，递增深度
         setTimeout(() => {
           this.propagateStackingForce(belowCoin, propagatedForceMagnitude, depth + 1);
         }, 50 * depth); // 稍微延迟传播，使动画更自然
-        
         // 延迟恢复下方金币的原始摩擦力
         setTimeout(() => {
           if (belowCoin && belowCoin.plugin && belowCoin.plugin.originalFriction) {
@@ -2094,33 +2081,311 @@ export default {
         }, 300 + 100 * depth); // 传播越深，恢复摩擦力的时间越长
       });
     },
-    
     // 查找直接位于金币下方的金币
     findDirectlyBelowCoins(coin) {
       // 检测半径 - 根据金币半径稍微扩大一些
       const coinRadius = coin.circleRadius || 22.5;
       const detectionWidth = coinRadius * 1.2; // 略大于金币直径，只查找正下方
       const detectionHeight = coinRadius * 1.8; // 查找距离为金币直径的1.8倍
-      
       return this.coins.filter(otherCoin => {
         // 排除自身
         if (otherCoin === coin) return false;
-        
         // 排除正在掉落或动画中的金币
         if (otherCoin.plugin && (otherCoin.plugin.isDropping || otherCoin.plugin.animatingRemoval)) {
           return false;
         }
-        
         // 检查是否在水平方向上正下方
         const dx = Math.abs(otherCoin.position.x - coin.position.x);
         if (dx > detectionWidth) return false;
-        
         // 检查是否在垂直方向上足够近
         const dy = otherCoin.position.y - coin.position.y;
         if (dy <= 0 || dy > detectionHeight) return false;
-        
         return true;
       });
+    },
+    // 新增：根据总金币数量动态调整金币的穿透摩擦力板几率
+    adjustCoinPassThroughRate() {
+      // 获取当前有效金币数量
+      const activeCoinCount = this.coins.filter(coin =>
+        !coin.plugin || (!coin.plugin.animatingRemoval && !coin.plugin.isRemoved)
+      ).length;
+      // 获取摩擦力板的位置
+      if (!this.movableObstacle.body) return;
+      const plateBounds = this.movableObstacle.body.bounds;
+      const plateTopY = plateBounds.min.y;
+      // 根据金币数量计算穿透概率基础值
+      // 金币越多，基础穿透概率越高
+      let basePassThroughRate = 0;
+      if (activeCoinCount < 50) {
+        // 低于50个金币，基础概率很低
+        basePassThroughRate = 0.01;
+      } else if (activeCoinCount < 70) {
+        // 50-70个金币，基础概率适中
+        basePassThroughRate = 0.05 + (activeCoinCount - 50) * 0.005; // 0.05 到 0.15
+      } else if (activeCoinCount < 90) {
+        // 70-90个金币，基础概率较高
+        basePassThroughRate = 0.15 + (activeCoinCount - 70) * 0.01; // 0.15 到 0.35
+      } else {
+        // 90-100个金币，基础概率非常高
+        basePassThroughRate = 0.35 + (activeCoinCount - 90) * 0.025; // 0.35 到 0.6
+      }
+      // 应用到所有靠近摩擦力板的金币
+      this.coins.forEach(coin => {
+        // 忽略正在掉落或动画中的金币，或已有穿透标记的金币
+        if (coin.plugin && (coin.plugin.isDropping || coin.plugin.animatingRemoval ||
+                           coin.plugin.isRemoved || coin.plugin.passingThroughPlate)) {
+          return;
+        }
+        // 计算与摩擦力板的距离
+        const distToPlate = Math.abs(coin.position.y - plateTopY);
+        // 只处理接近摩擦力板的金币
+        if (distToPlate < 30) {
+          // 根据距离调整穿透概率
+          // 越靠近摩擦力板，穿透概率越高
+          const distanceFactor = Math.max(0, 1 - distToPlate / 30);
+          // 考虑金币的速度方向
+          const velocityFactor = coin.velocity.y > 0 ? 1 + (coin.velocity.y / 5) : 0.5;
+          // 考虑金币是否受压
+          const pressureFactor = this.checkCoinPressure(coin) ? 2 : 1;
+          // 根据距离、速度、压力和金币总数计算最终穿透概率
+          const finalPassThroughRate = basePassThroughRate * distanceFactor * velocityFactor * pressureFactor;
+          // 使用随机数决定是否让金币穿过
+          if (Math.random() < finalPassThroughRate) {
+            // 临时修改金币的物理属性，让其更容易穿过摩擦力板
+            this.applyCoinPassThroughEffect(coin);
+          }
+        }
+      });
+    },
+    // 应用效果使金币穿过摩擦力板
+    applyCoinPassThroughEffect(coin) {
+      // 如果金币已经在穿透状态，不重复应用
+      if (coin.plugin && coin.plugin.passingThroughPlate) {
+        return;
+      }
+      // 保存原始碰撞过滤器
+      coin.plugin = coin.plugin || {};
+      const originalFilter = {
+        category: coin.collisionFilter.category,
+        mask: coin.collisionFilter.mask
+      };
+      coin.plugin.originalFilter = originalFilter;
+      // 设置特殊碰撞过滤器，允许穿过摩擦板
+      this.Body.set(coin, {
+        collisionFilter: {
+          category: 0x0001,
+          mask: 0x0001 // 只与其他金币碰撞，不与摩擦板碰撞
+        },
+        // 极低的摩擦力
+        friction: 0.001,
+        frictionAir: 0.001,
+        frictionStatic: 0.001,
+        // 设置为不回弹
+        restitution: 0,
+        // 允许更多重叠，减少卡住可能
+        slop: 0.8
+      });
+      // 标记正在穿透
+      coin.plugin.passingThroughPlate = true;
+      // 应用更强的向下力
+      this.Body.applyForce(coin, coin.position, {
+        x: 0,
+        y: 0.015 // 增加向下力
+      });
+      // 确保金币有足够的初始向下速度
+      if (coin.velocity.y < 3) {
+        this.Body.setVelocity(coin, {
+          x: coin.velocity.x,
+          y: 3 + Math.random() * 2 // 确保有较大的向下初速度
+        });
+      }
+    },
+    // 新增：每帧更新穿透状态
+    updateCoinPassThroughStatus() {
+      // 获取摩擦力板的位置
+      if (!this.movableObstacle.body) return;
+      const plateTopY = this.movableObstacle.body.bounds.min.y;
+      const plateBottomY = this.movableObstacle.body.bounds.max.y;
+      this.coins.forEach(coin => {
+        // 跳过正在动画或已移除的金币
+        if (coin.plugin && (coin.plugin.animatingRemoval || coin.plugin.isRemoved)) {
+          return;
+        }
+        // 处理正在穿透的金币
+        if (coin.plugin && coin.plugin.passingThroughPlate) {
+          // 计算与摩擦力板的相对位置
+          const coinBottomY = coin.position.y + coin.circleRadius;
+          // 如果金币底部已经超过摩擦板底部，开始执行移除动画
+          if (coinBottomY > plateBottomY + 5) {
+            // 开始金币消失动画
+            this.startCoinRemovalAnimation(coin);
+            // 增加总额
+            if (coin.value) {
+              this.totalValue += coin.value;
+              console.log(`金币(${coin.value})穿过摩擦板，总额增加到${this.totalValue}`);
+            }
+          } else {
+            // 还在穿透过程中，检查下落速度
+            // 如果速度过低，增加向下的推力和速度
+            if (coin.velocity.y < 1) {
+              this.Body.setVelocity(coin, {
+                x: coin.velocity.x,
+                y: 1.5 + Math.random()
+              });
+              this.Body.applyForce(coin, coin.position, {
+                x: 0,
+                y: 0.01
+              });
+            }
+          }
+        }
+        // 检测新的穿透条件
+        else {
+          // 计算与摩擦力板的距离
+          const distToPlate = Math.abs(coin.position.y - plateTopY);
+          // 靠近摩擦力板且有足够的向下速度或压力，考虑穿透
+          const hasDownwardMomentum = coin.velocity.y > 0.8;
+          const isUnderPressure = this.checkCoinPressure(coin);
+          const isCloseToPlate = distToPlate < 25;
+          if (isCloseToPlate && (hasDownwardMomentum || isUnderPressure)) {
+            // 获取当前有效金币数量
+            const activeCoinCount = this.coins.filter(c => 
+              !c.plugin || (!c.plugin.animatingRemoval && !c.plugin.isRemoved)
+            ).length;
+            // 根据金币数量计算穿透概率
+            // 金币越多，穿透概率越高
+            let passThroughChance = 0.01; // 基础概率
+            if (activeCoinCount > 50) {
+              // 50个以上金币时，概率开始提高
+              passThroughChance = 0.01 + ((activeCoinCount - 50) / 50) * 0.29; // 最高到30%
+            }
+            // 增加压力因素
+            if (isUnderPressure) {
+              passThroughChance += 0.2; // 受压时额外增加20%穿透概率
+            }
+            // 增加速度因素
+            if (coin.velocity.y > 2) {
+              passThroughChance += (coin.velocity.y - 2) * 0.05; // 速度越大概率越高
+            }
+            // 最终概率上限
+            passThroughChance = Math.min(0.8, passThroughChance);
+            // 随机决定是否穿透
+            if (Math.random() < passThroughChance) {
+              this.applyCoinPassThroughEffect(coin);
+            }
+          }
+        }
+      });
+    },
+
+    // 新增：启动金币移除动画
+    startCoinRemovalAnimation(coin) {
+      // 如果已经在执行动画，不再重复处理
+      if (coin.plugin && coin.plugin.animatingRemoval) {
+        return;
+      }
+      
+      // 标记金币正在执行移除动画
+      coin.plugin = coin.plugin || {};
+      coin.plugin.animatingRemoval = true;
+      coin.plugin.removalStartTime = Date.now();
+      coin.plugin.initialRemovalPosition = { ...coin.position };
+      
+      // 保存原始渲染属性
+      if (coin.render && coin.render.sprite) {
+        coin.plugin.originalRender = {
+          xScale: coin.render.sprite.xScale,
+          yScale: coin.render.sprite.yScale,
+          opacity: coin.render.opacity || 1
+        };
+      }
+      
+      // 使金币能够穿过所有物体加速下落
+      this.Body.set(coin, {
+        collisionFilter: {
+          category: 0x0004,
+          mask: 0x0000 // 不与任何物体碰撞
+        },
+        friction: 0.01,          // 极低摩擦力
+        frictionAir: 0.01,       // 极低空气阻力
+        frictionStatic: 0.01,    // 极低静摩擦力
+        restitution: 0,          // 无回弹
+        isSensor: true           // 设为传感器，完全穿过其他物体
+      });
+      
+      // 设置移除动画的持续时间和效果 - 快速移除效果
+      coin.plugin.removalAnimationDuration = 400; // 400毫秒内完成动画
+      
+      // 应用加速下落的力和速度
+      const exitVelocity = {
+        x: coin.velocity.x * 0.3, // 保留一小部分横向速度
+        y: 5 + Math.random() * 3  // 较大的向下速度
+      };
+      this.Body.setVelocity(coin, exitVelocity);
+      
+      // 添加一些旋转效果使动画更生动
+      this.Body.setAngularVelocity(coin, (Math.random() - 0.5) * 0.2);
+      
+      // 播放金币消失的音效
+      this.playCoinDropSound();
+    },
+    // 新增：限制总金币数量
+    enforceCoinLimit() {
+      const MAX_COINS = 100; // 最大金币数量限制
+      
+      // 获取当前有效金币数量
+      const activeCoins = this.coins.filter(coin => 
+        !coin.plugin || (!coin.plugin.animatingRemoval && !coin.plugin.isRemoved)
+      );
+      
+      // 如果超过限制，移除多余的金币
+      if (activeCoins.length > MAX_COINS) {
+        console.log(`金币数量(${activeCoins.length})超过限制(${MAX_COINS})，开始移除多余金币`);
+        
+        // 获取摩擦力板的位置
+        const plateTopY = this.movableObstacle?.body?.bounds?.min?.y || 350;
+        
+        // 按照离摩擦力板距离排序，优先移除最靠近摩擦力板的金币
+        const sortedCoins = [...activeCoins].sort((a, b) => {
+          const distA = Math.abs(a.position.y - plateTopY);
+          const distB = Math.abs(b.position.y - plateTopY);
+          return distA - distB; // 距离越小，越优先移除
+        });
+        
+        // 需要移除的金币数量
+        const removeCount = sortedCoins.length - MAX_COINS;
+        
+        // 移除多余的金币
+        for (let i = 0; i < removeCount; i++) {
+          const coinToRemove = sortedCoins[i];
+          
+          // 开始移除动画
+          coinToRemove.plugin = coinToRemove.plugin || {};
+          if (!coinToRemove.plugin.animatingRemoval) {
+            coinToRemove.plugin.animatingRemoval = true;
+            coinToRemove.plugin.removalStartTime = Date.now();
+            
+            // 立即将碰撞过滤器修改为穿透所有物体
+            this.Body.set(coinToRemove, {
+              collisionFilter: {
+                category: 0x0004,
+                mask: 0x0000 // 不与任何物体碰撞
+              },
+              friction: 0.01,
+              frictionAir: 0.01,
+              frictionStatic: 0.01
+            });
+            
+            // 应用更强的下落力
+            this.Body.applyForce(coinToRemove, coinToRemove.position, {
+              x: 0,
+              y: 0.02 // 较大的向下力
+            });
+            
+            console.log(`移除靠近摩擦力板的金币(${coinToRemove.value})`);
+          }
+        }
+      }
     },
   },
   beforeDestroy() {
