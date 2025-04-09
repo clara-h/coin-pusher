@@ -1338,7 +1338,7 @@ export default {
       
       // 先处理穿过摩擦板的金币（从后向前处理，避免索引问题）
       for (let i = this.coins.length - 1; i >= 0; i--) {
-        const coin = this.coins[i];
+            const coin = this.coins[i];
         const data = coinData[i];
         
         // 跳过正在动画或已移除的金币
@@ -1408,7 +1408,7 @@ export default {
             slop: 0.7 // 进一步增加允许重叠量
           });
           
-          coin.plugin = coin.plugin || {};
+            coin.plugin = coin.plugin || {};
           coin.plugin.canPassThroughPlate = true;
           
           // 更强的向下速度脉冲
@@ -1450,8 +1450,8 @@ export default {
           coin.plugin.pressureStartTime = Date.now();
           
           // 额外的向下力
-          this.Body.applyForce(coin, coin.position, {
-            x: 0,
+            this.Body.applyForce(coin, coin.position, {
+              x: 0,
             y: 0.005 // 向下的力比普通状态更大
           });
         } else {
@@ -1689,9 +1689,9 @@ export default {
             // 从物理世界和金币数组中移除
             this.World.remove(this.engine.world, coin);
             this.coins.splice(i, 1);
-            continue;
-          }
-          
+          continue;
+        }
+        
           // 动画还在进行中，更新视觉效果
           // 使用缓动函数使动画更自然
           const easedProgress = this.easeOutQuad(progress);
@@ -2350,10 +2350,15 @@ export default {
         const plateTopY = this.movableObstacle?.body?.bounds?.min?.y || 350;
         
         // 按照离摩擦力板距离排序，优先移除最靠近摩擦力板的金币
-        const sortedCoins = [...activeCoins].sort((a, b) => {
+        let sortedCoins = [...activeCoins].sort((a, b) => {
           const distA = Math.abs(a.position.y - plateTopY);
           const distB = Math.abs(b.position.y - plateTopY);
           return distA - distB; // 距离越小，越优先移除
+        });
+        
+        // 过滤出只保留与摩擦板接触的金币
+        sortedCoins = sortedCoins.filter(coin => {
+          return coin.position.y > plateTopY && coin.position.y < plateTopY + 30; // 检查金币是否在摩擦板的上方30像素内
         });
         
         // 需要移除的金币数量
