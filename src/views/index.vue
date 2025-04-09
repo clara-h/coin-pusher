@@ -602,10 +602,11 @@ export default {
         const value = coinValues[Math.floor(Math.random() * coinValues.length)];
         dropValue += value;
         
-        // 获取可移动底板的实时位置
+        // 获取可移动底板的实时位置，确保金币在移动条下方
         let dropY = this.dropArea.y; // 默认位置
         if (this.platformMotion.platform) {
-          dropY = this.platformMotion.platform.bounds.max.y + 5;
+          // 确保金币从移动条下方掉落，留出足够空间
+          dropY = this.platformMotion.platform.bounds.max.y + 23; // 金币半径+一点空间
         }
         
         // 创建位置、角度和速度，增加随机性避免堆叠
@@ -641,9 +642,13 @@ export default {
             density: 0.2,
             plugin: {}
           });
+          
+          // 存储半径信息
+          coin.circleRadius = 22.5;
         } else {
           // 创建新的金币 - 使用预缓存的纹理
-          coin = this.Bodies.circle(data.position.x, data.position.y, 22.5, {
+          const coinRadius = 22.5;
+          coin = this.Bodies.circle(data.position.x, data.position.y, coinRadius, {
             angle: data.angle,
             restitution: 0.01,
             friction: 1.5,
@@ -666,6 +671,9 @@ export default {
             value: data.value,
             plugin: {}
           });
+          
+          // 存储半径信息
+          coin.circleRadius = coinRadius;
         }
         
         // 设置初始速度和角速度
@@ -1188,8 +1196,10 @@ export default {
         const data = coinData.find(d => d.coin === coin);
         if (!data) continue;
         
-        // 如果金币已经穿过摩擦板（超过顶部即可），直接移除并计入总额
-        if (coin.position.y > plateTopY + 0) { // 只要超过摩擦板就移除
+        // 检查金币是否已经超过摩擦板（改进检测条件）
+        // 摩擦板的上边界为plateTopY，只要金币的Y坐标大于这个值，就表示超过了摩擦板
+        if (coin.position.y + 45 * 0.8 > plateTopY) {
+          console.log(`金币(${coin.value})超过摩擦板，移除金币`);
           // 记录金额并添加到总额
           if (coin.value) {
             this.totalValue += coin.value;
@@ -1201,6 +1211,39 @@ export default {
           
           // 移除金币
           this.removeCoin(coin, i);
+          continue; // 此金币已移除，跳过后续检查
+        }
+        
+        // 检查金币是否超过或接近顶部移动条
+        const topPlatform = this.platformMotion.platform;
+        if (topPlatform) {
+          const topPlatformTopY = topPlatform.bounds.min.y;
+          const topPlatformBottomY = topPlatform.bounds.max.y;
+          
+          // 如果金币处于顶部移动条的影响范围内，确保它不会被顶到移动条上方
+          if (coin.position.y - coin.circleRadius <= topPlatformBottomY + 5) {
+            // 设置碰撞过滤器，确保金币与顶部移动条有正常碰撞
+            coin.collisionFilter = {
+              category: 0x0001,
+              mask: 0xFFFFFFFF // 与所有物体碰撞
+            };
+            
+            // 如果金币正在穿过顶部移动条，将其往下推
+            if (coin.position.y - coin.circleRadius < topPlatformBottomY &&
+                coin.position.y + coin.circleRadius > topPlatformTopY) {
+              // 设置金币位置到移动条下方
+              this.Body.setPosition(coin, {
+                x: coin.position.x,
+                y: topPlatformBottomY + coin.circleRadius + 1
+              });
+              
+              // 给金币一个向下的速度
+              this.Body.setVelocity(coin, {
+                x: coin.velocity.x,
+                y: Math.max(1, coin.velocity.y) // 确保有向下的速度
+              });
+            }
+          }
         }
       }
       
@@ -1226,7 +1269,7 @@ export default {
         // 增强向下力，使金币更容易穿过摩擦板
         this.Body.applyForce(coin, coin.position, {
           x: 0,
-          y: 0.008 // 再次增加向下力，确保能穿过
+          y: 0.01 // 更大的向下力，确保能穿过
         });
         
         // 降低阈值，使金币更容易进入穿透模式
@@ -1239,20 +1282,20 @@ export default {
           
           // 近乎无摩擦力状态
           this.Body.set(coin, {
-            friction: 0.0001,
-            frictionAir: 0.0001,
-            frictionStatic: 0.0001,
+            friction: 0.00001,
+            frictionAir: 0.00001,
+            frictionStatic: 0.00001,
             restitution: 0.01,
-            slop: 0.5 // 进一步增加允许重叠量
+            slop: 0.7 // 进一步增加允许重叠量
           });
           
           coin.plugin = coin.plugin || {};
           coin.plugin.canPassThroughPlate = true;
           
-          // 直接给一个向下的速度脉冲
+          // 更强的向下速度脉冲
           this.Body.setVelocity(coin, {
             x: coin.velocity.x,
-            y: Math.max(coin.velocity.y, 5) // 确保足够的下落速度
+            y: Math.max(coin.velocity.y, 7) // 增大下落速度
           });
         }
       }
@@ -1330,23 +1373,24 @@ export default {
         if (coin.plugin && coin.plugin.canPassThroughPlate) {
           coin.collisionFilter = {
             category: 0x0001,
-            mask: 0xFFFFFFFF
+            mask: 0x0001 // 保持只与金币碰撞，确保继续下落
           };
           delete coin.plugin.canPassThroughPlate;
         }
         
         // 额外下落重力 - 加速金币离开屏幕
-        const gravityFactor = Math.min(0.01, 0.002 + distToPlate / 500);
+        const gravityFactor = Math.min(0.02, 0.005 + distToPlate / 500); // 更大的重力
         this.Body.applyForce(coin, coin.position, {
           x: 0,
           y: gravityFactor
         });
         
         // 确保一定的下落速度
-        if (distToPlate > 10 && coin.velocity.y < 3) {
+        const minVelocity = 5; // 更大的最小速度
+        if (coin.velocity.y < minVelocity) {
           this.Body.setVelocity(coin, {
             x: coin.velocity.x,
-            y: Math.max(3, coin.velocity.y)
+            y: Math.max(minVelocity, coin.velocity.y)
           });
           
           // 标记为快速下落
@@ -1431,17 +1475,31 @@ export default {
         for (let i = this.coins.length - 1; i >= 0; i--) {
           const coin = this.coins[i];
           
-          // 检查金币是否已经超过摩擦板但未被移除
-          if (coin.position.y > plateTopY + 5) {
+          // 检查金币是否已经超过摩擦板但未被移除（使用更严格的检测条件）
+          if (coin.position.y > plateTopY) {
             console.log(`清理：发现超过摩擦板的金币(${coin.value})，强制移除`);
             
             // 记录金额并添加到总额
-      if (coin.value) {
-        this.totalValue += coin.value;
-      }
-      
+            if (coin.value) {
+              this.totalValue += coin.value;
+            }
+            
             // 移除金币
             this.removeCoin(coin, i);
+            continue; // 此金币已移除，跳过后续检查
+          }
+          
+          // 检查金币是否超过顶部移动条（添加新的检查）
+          if (this.platformMotion.platform) {
+            const topPlatformTopY = this.platformMotion.platform.bounds.min.y;
+            // 确保金币半径信息存在
+            const coinRadius = coin.circleRadius || 22.5;
+            
+            if (coin.position.y < topPlatformTopY - coinRadius) {
+              console.log(`清理：发现超过顶部移动条的金币，强制移除`);
+              this.removeCoin(coin, i);
+              continue; // 此金币已移除，跳过后续检查
+            }
           }
           
           // 额外检查：如果金币Y坐标超过游戏区域，也强制移除
