@@ -209,9 +209,6 @@ export default {
           }
         })
       ];
-
-      // 顶部障碍物将作为可移动底板，不再需要单独创建收集区域底板
-      
       // 创建固定在底部的高摩擦力条
       const movableObstacle = this.Bodies.rectangle(
         200, // 中心x坐标
@@ -302,17 +299,6 @@ export default {
             // 标记金币正在接触平台
             coinBody.plugin.touchingPlatform = true;
             coinBody.plugin.platformId = platformBody.id;
-            
-            // 特殊处理：在平台向上移动时，设置强粘附效果
-            if (platformBody.customData && platformBody.customData.direction < 0) {
-              coinBody.plugin.stuckToPlatform = true;
-              
-              // 降低金币的密度和空气摩擦力，使其更容易跟随平台
-              this.Body.set(coinBody, {
-                density: 0.001,    // 非常轻
-                frictionAir: 0.001 // 几乎没有空气阻力
-              });
-            }
           }
         });
       });
@@ -537,6 +523,11 @@ export default {
       // 更新金币纹理以匹配新的面值
       if (coin.render && coin.render.sprite) {
         coin.render.sprite.texture = this.offscreenCoinTextures[value];
+        // 统一设置金币的尺寸
+        coin.render.sprite.xScale = 1.5;
+        coin.render.sprite.yScale = 1.5;
+        // 确保金币不透明
+        coin.render.opacity = 1;
       }
       
       return coin;
@@ -562,13 +553,24 @@ export default {
         angularSpeed: 0,
         motion: 0
       });
+
+      // 确保渲染属性被正确重置
+      if (coin.render && coin.render.sprite) {
+        // 重置缩放和透明度，确保返回池中的金币属性正确
+        coin.render.opacity = 1;
+        coin.render.sprite.xScale = 1.5;
+        coin.render.sprite.yScale = 1.5;
+        if (coin.render.sprite.tint) {
+          delete coin.render.sprite.tint;
+        }
+      }
       
       // 移除任何额外的标记
       coin.plugin = {};
       
       // 限制对象池大小
       if (this.coinPool.objects.length < this.coinPool.maxSize) {
-      this.coinPool.objects.push(coin);
+        this.coinPool.objects.push(coin);
       } else {
         // 如果对象池已满，直接丢弃此金币
         console.log('对象池已满，丢弃金币');
@@ -633,6 +635,9 @@ export default {
         const data = coinDataList[index];
         let coin = this.getCoinFromPool(data.value);
         
+        // 固定的金币物理半径
+        const coinRadius = 22.5;
+        
         if (coin) {
           // 重用对象池中的金币
           this.Body.setPosition(coin, data.position);
@@ -647,10 +652,18 @@ export default {
           });
           
           // 存储半径信息
-          coin.circleRadius = 22.5;
+          coin.circleRadius = coinRadius;
+          
+          // 确保重用金币的渲染属性正确
+          if (coin.render && coin.render.sprite) {
+            coin.render.opacity = 1;
+            coin.render.visible = true;
+            coin.render.sprite.xScale = 1.5;
+            coin.render.sprite.yScale = 1.5;
+            coin.render.sprite.texture = this.offscreenCoinTextures[data.value];
+          }
         } else {
           // 创建新的金币 - 使用预缓存的纹理
-          const coinRadius = 22.5;
           coin = this.Bodies.circle(data.position.x, data.position.y, coinRadius, {
             angle: data.angle,
             restitution: 0.01,
@@ -663,6 +676,8 @@ export default {
             inertia: Infinity,
             inverseInertia: 0,
             render: {
+              visible: true,
+              opacity: 1,
               sprite: {
                 // 使用预缓存的纹理
                 texture: this.offscreenCoinTextures[data.value],
@@ -672,7 +687,9 @@ export default {
             },
             slop: 0.05,
             value: data.value,
-            plugin: {}
+            plugin: {
+              isCoin: true // 标记为金币，便于碰撞检测
+            }
           });
           
           // 存储半径信息
@@ -788,6 +805,7 @@ export default {
       
       // 如果没有缓存，创建新纹理
       const canvas = document.createElement('canvas');
+      // 统一所有金币纹理的尺寸
       canvas.width = 45;
       canvas.height = 45;
       const ctx = canvas.getContext('2d');
@@ -1573,9 +1591,9 @@ export default {
             // 平滑过渡的渐变效果
             const easeOutProgress = 1 - Math.pow(1 - progress, 2); // 缓出效果
             
-            // 更新视觉效果
+            // 更新视觉效果 - 确保使用统一的缩放比例
             if (coin.render && coin.render.sprite) {
-              const originalScale = coin.plugin.originalRender?.xScale || 1.5;
+              const originalScale = 1.5; // 使用固定的缩放比例
               // 先放大后缩小的效果
               let scale;
               if (progress < 0.3) {
