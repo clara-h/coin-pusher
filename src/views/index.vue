@@ -760,7 +760,7 @@ export default {
           });
           
           // 1秒后恢复正常摩擦力
-          setTimeout(() => {
+      setTimeout(() => {
             if (existingCoin && existingCoin.plugin) {
               this.Body.set(existingCoin, {
                 friction: 1.5,
@@ -1188,26 +1188,17 @@ export default {
             });
             this.Body.setAngularVelocity(coin, (Math.random() - 0.5) * 0.2); // 随机角速度
             
-            // 根据金币面值设置不同的掉落效果
-            if (coin.value) {
-              // 面值较大的金币掉落得更慢，更显眼
-              const valueScale = Math.min(2, coin.value / 10);
-              
-              // 根据面值调整动画持续时间（500-1000ms）
-              coin.plugin.removalAnimationDuration = 500 + valueScale * 250;
-              
-              // 设置金币渲染特效
-              if (coin.render) {
-                // 保存原始渲染属性，以便在动画结束时恢复
-                coin.plugin.originalRender = {
-                  xScale: coin.render.sprite.xScale,
-                  yScale: coin.render.sprite.yScale,
-                  opacity: 1
-                };
-              }
-            } else {
-              // 默认动画持续时间
-              coin.plugin.removalAnimationDuration = 1000;
+            // 统一所有金币的动画持续时间和效果
+            coin.plugin.removalAnimationDuration = 600;
+            
+            // 设置金币渲染特效
+            if (coin.render) {
+              // 保存原始渲染属性，以便在动画结束时恢复
+              coin.plugin.originalRender = {
+                xScale: coin.render.sprite.xScale,
+                yScale: coin.render.sprite.yScale,
+                opacity: 1
+              };
             }
             
             // 播放掉落音效
@@ -1500,10 +1491,10 @@ export default {
             console.log(`清理：发现超过摩擦板的金币(${coin.value})，强制移除`);
             
             // 记录金额并添加到总额
-            if (coin.value) {
-              this.totalValue += coin.value;
-            }
-            
+      if (coin.value) {
+        this.totalValue += coin.value;
+      }
+      
             // 移除金币
             this.removeCoin(coin, i);
             continue; // 此金币已移除，跳过后续检查
@@ -1601,12 +1592,6 @@ export default {
               
               // 透明度变化 - 保持到50%进度，然后开始淡出
               coin.render.opacity = progress < 0.5 ? 1 : 1 - ((progress - 0.5) / 0.5);
-              
-              // 闪烁效果 - 仅对大面值金币
-              if (coin.value >= 25 && progress < 0.7) {
-                const flashIntensity = Math.sin(progress * 15) * 0.5 + 0.5;
-                coin.render.sprite.tint = `rgba(255, 255, 255, ${flashIntensity})`;
-              }
             }
             
             // 更新物理效果 - 根据进度调整
@@ -1616,27 +1601,19 @@ export default {
               y: verticalVelocity
             });
             
-            // 旋转效果 - 根据面值有不同的旋转效果
-            let rotationSpeed;
-            if (coin.value <= 5) {
-              rotationSpeed = 0.05 + easeOutProgress * 0.1; // 小面值快速旋转
-            } else if (coin.value <= 25) {
-              rotationSpeed = 0.03 + easeOutProgress * 0.07; // 中面值中速旋转
-            } else {
-              rotationSpeed = 0.02 + easeOutProgress * 0.05; // 大面值慢速旋转
-            }
+            // 统一的旋转效果
+            const rotationSpeed = 0.03 + easeOutProgress * 0.07;
             
             // 随机方向旋转
             const direction = coin.plugin.rotationDirection || 
                              (coin.plugin.rotationDirection = Math.random() > 0.5 ? 1 : -1);
             this.Body.setAngularVelocity(coin, rotationSpeed * direction);
             
-            // 根据面值添加特殊效果
-            if (coin.value >= 25 && Math.random() > 0.9) {
-              // 对大面值金币有时添加一个小跳跃
+            // 随机小跳动效果 - 概率较低以优化性能
+            if (Math.random() > 0.95) {
               this.Body.applyForce(coin, coin.position, {
                 x: (Math.random() - 0.5) * 0.001,
-                y: -0.005 * Math.random()
+                y: -0.003 * Math.random()
               });
             }
           }
