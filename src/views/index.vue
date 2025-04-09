@@ -1,6 +1,11 @@
 <template>
   <div class="coin-container">
-    <button @click="DropCoins" class="drop-button">掉落金币</button>
+    <div class="buttons-container">
+      <button @click="DropCoins(5)" class="drop-button">掉落5枚</button>
+      <button @click="DropCoins(10)" class="drop-button">掉落10枚</button>
+      <button @click="DropCoins(20)" class="drop-button">掉落20枚</button>
+      <button @click="DropCoins(50)" class="drop-button">掉落50枚</button>
+    </div>
     <div class="game-area">
       <div ref="coinBox" class="coin-box">
       </div>
@@ -566,11 +571,12 @@ export default {
       }
     },
     
-    DropCoins() {
-      console.log('掉落金币')
+    // 优化 DropCoins 方法，接受指定数量参数
+    DropCoins(coinCount) {
+      console.log(`掉落${coinCount}枚金币`)
       
       // 性能监控：如果帧率过低，减少掉落的金币数量
-      let coinCount = Math.floor(Math.random() * 5) + 3; // 默认随机3-7个金币
+      let actualCoinCount = coinCount; // 默认使用指定数量
       
       // 如果引擎存在且有性能数据
       if (this.engine && this.engine.timing && this.engine.timing.lastDelta > 0) {
@@ -578,16 +584,19 @@ export default {
         
         // 根据帧率调整金币数量
         if (fps < 30) {
-          // 帧率低时减少金币
-          coinCount = Math.min(coinCount, 3);
+          // 帧率低时限制最大数量
+          actualCoinCount = Math.min(actualCoinCount, Math.max(5, Math.floor(actualCoinCount * 0.5)));
+          console.log(`帧率低，数量调整为${actualCoinCount}`);
         } else if (fps < 45) {
-          // 帧率中等时适当减少
-          coinCount = Math.min(coinCount, 5);
+          // 帧率中等时适当限制
+          actualCoinCount = Math.min(actualCoinCount, Math.max(10, Math.floor(actualCoinCount * 0.7)));
+          console.log(`帧率一般，数量调整为${actualCoinCount}`);
         }
         
         // 如果金币总数超过80个，也减少新增数量
         if (this.coins.length > 80) {
-          coinCount = Math.min(coinCount, 2);
+          actualCoinCount = Math.min(actualCoinCount, Math.max(5, Math.floor(actualCoinCount * 0.4)));
+          console.log(`金币已多，数量调整为${actualCoinCount}`);
         }
       }
       
@@ -596,14 +605,21 @@ export default {
       // 记录本次投放的总金额 - 仅用于显示，不会立即添加到总额
       let dropValue = 0
 
-      // 设置掉落金币的时间间隔 - 根据硬件性能调整
-      const dropInterval = this.engine && this.engine.timing && this.engine.timing.lastDelta > 20 
+      // 设置掉落金币的时间间隔 - 根据硬件性能和数量调整
+      const baseInterval = this.engine && this.engine.timing && this.engine.timing.lastDelta > 20 
         ? 200  // 性能较差时增加间隔
         : 150; // 默认间隔
       
+      // 根据金币数量调整间隔，数量越多间隔越短
+      const dropInterval = actualCoinCount > 30 
+        ? Math.max(50, baseInterval - 80) // 大量金币时缩短间隔
+        : (actualCoinCount > 15 
+            ? Math.max(80, baseInterval - 40) // 中等数量时略微缩短
+            : baseInterval); // 少量使用默认间隔
+      
       // 批量创建所有金币的数据
       const coinDataList = [];
-      for (let i = 0; i < coinCount; i++) {
+      for (let i = 0; i < actualCoinCount; i++) {
         const value = coinValues[Math.floor(Math.random() * coinValues.length)];
         dropValue += value;
         
@@ -613,10 +629,10 @@ export default {
           dropY = this.platformMotion.platform.bounds.max.y + 5;
         }
         
-        // 创建位置、角度和速度
+        // 创建位置、角度和速度，增加随机性避免堆叠
         const position = {
           x: this.getRandomInt(this.dropArea.minX, this.dropArea.maxX),
-          y: dropY
+          y: dropY + this.getRandomInt(-2, 2) // 微小随机，避免完全重叠
         };
         const angle = Math.random() * Math.PI * 2;
         const velocity = {
@@ -1423,23 +1439,51 @@ export default {
   font-family: Arial, sans-serif;
 }
 
+.buttons-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: 100%;
+  max-width: 500px;
+}
+
 .drop-button {
-  padding: 12px 24px;
-  font-size: 18px;
+  padding: 10px 20px;
+  font-size: 16px;
   background: linear-gradient(45deg, #4CAF50, #8BC34A);
   color: white;
   border: none;
   border-radius: 25px;
   cursor: pointer;
-  margin-bottom: 20px;
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
   transition: all 0.3s ease;
+  flex: 1;
+  min-width: 100px;
+  text-align: center;
+}
+
+.drop-button:nth-child(1) {
+  background: linear-gradient(45deg, #2196F3, #03A9F4);
+}
+
+.drop-button:nth-child(2) {
+  background: linear-gradient(45deg, #9C27B0, #673AB7);
+}
+
+.drop-button:nth-child(3) {
+  background: linear-gradient(45deg, #FF9800, #FF5722);
+}
+
+.drop-button:nth-child(4) {
+  background: linear-gradient(45deg, #E91E63, #F44336);
 }
 
 .drop-button:hover {
-  background: linear-gradient(45deg, #45a049, #7CB342);
   transform: translateY(-2px);
   box-shadow: 0 6px 8px rgba(0,0,0,0.15);
+  filter: brightness(1.1);
 }
 
 .drop-button:active {
