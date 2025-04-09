@@ -664,7 +664,7 @@ export default {
           });
         } else {
           // 创建新的金币 - 使用预缓存的纹理
-          coin = this.Bodies.circle(data.position.x, data.position.y, 20, {
+          coin = this.Bodies.circle(data.position.x, data.position.y, 22.5, {
             angle: data.angle,
             restitution: 0.01,
             friction: 1.5,
@@ -672,15 +672,15 @@ export default {
             frictionStatic: 1.5,
             density: 0.2,
             chamfer: { radius: 2 },
-            mass: 0.2,
+            mass: 0.2, // 金币质量
             inertia: Infinity,
             inverseInertia: 0,
             render: {
               sprite: {
                 // 使用预缓存的纹理
                 texture: this.offscreenCoinTextures[data.value],
-                xScale: 1.33,
-                yScale: 1.33
+                xScale: 1.5,
+                yScale: 1.5
               }
             },
             slop: 0.05,
@@ -721,8 +721,8 @@ export default {
       
       // 如果没有缓存，创建新纹理
       const canvas = document.createElement('canvas');
-      canvas.width = 40;
-      canvas.height = 40;
+      canvas.width = 45;
+      canvas.height = 45;
       const ctx = canvas.getContext('2d');
       
       // 优化绘制操作，减少状态更改
@@ -730,11 +730,11 @@ export default {
       
       // 使用圆形剪切区域，避免多余绘制
       ctx.beginPath();
-      ctx.arc(20, 20, 19, 0, Math.PI * 2);
+      ctx.arc(22.5, 22.5, 21.5, 0, Math.PI * 2);
       ctx.clip();
       
       // 使用渐变填充，一次创建减少状态切换
-      const gradient = ctx.createRadialGradient(16, 16, 2, 20, 20, 20);
+      const gradient = ctx.createRadialGradient(18, 18, 2, 22.5, 22.5, 22.5);
       
       // 根据金币面值使用不同颜色
       let colorMain, colorEdge, textColor;
@@ -786,10 +786,10 @@ export default {
       
       // 添加金额文字 - 只设置一次字体
       ctx.fillStyle = textColor;
-      ctx.font = 'bold 15px Arial';
+      ctx.font = 'bold 17px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(value, 20, 20);
+      ctx.fillText(value, 22.5, 22.5);
       
       // 恢复上下文
       ctx.restore();
@@ -1161,7 +1161,7 @@ export default {
           const distance = Math.sqrt(dx * dx + dy * dy);
           
           // 如果距离小于金币直径的1.2倍，认为有接触
-          if (distance < 40) {
+          if (distance < 45) {
             contactCount++;
             
             // 检查是否有金币在顶部（Y坐标更小）
@@ -1318,7 +1318,7 @@ export default {
             data.coin !== coin && 
             !data.removed &&
             data.position.y > coin.position.y + 15 && 
-            Math.abs(data.position.x - coin.position.x) < 40
+            Math.abs(data.position.x - coin.position.x) < 45
           )
           .map(data => data.coin);
         
