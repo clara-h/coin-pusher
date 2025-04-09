@@ -336,6 +336,11 @@ export default {
           this.checkAllCoins();
         }
         
+        // 降低堆叠检测频率，每10帧检查一次
+        if (timestamp % 10 === 0) {
+          this.checkCoinStacking();
+        }
+        
         // 处理平台对刚刚脱离接触的金币的额外推动力 - 确保金币被顺利推动
         const platform = this.platformMotion.platform;
         if (platform && platform.customData) {
@@ -573,7 +578,7 @@ export default {
       
       // 限制对象池大小
       if (this.coinPool.objects.length < this.coinPool.maxSize) {
-        this.coinPool.objects.push(coin);
+      this.coinPool.objects.push(coin);
       } else {
         // 如果对象池已满，直接丢弃此金币
         console.log('对象池已满，丢弃金币');
@@ -847,7 +852,7 @@ export default {
           });
           
           // 1秒后恢复正常摩擦力
-          setTimeout(() => {
+      setTimeout(() => {
             if (targetCoin && targetCoin.plugin) {
               this.Body.set(targetCoin, {
                 friction: 1.5,
@@ -1621,7 +1626,7 @@ export default {
         let index = 0;
         
         while (coinsToRemove > 0 && index < this.coins.length) {
-          const coin = this.coins[index];
+        const coin = this.coins[index];
           // 避免移除正在执行动画的金币
           if (!coin.plugin || !coin.plugin.animatingRemoval) {
             // 不计入总额，这些是系统自动清理的
@@ -1788,12 +1793,333 @@ export default {
       // 移除所有完成动画的金币
       coinsToRemove.forEach(({ coin, index }) => {
         // 添加到总额
-        if (coin.value) {
-          this.totalValue += coin.value;
-        }
-        
+      if (coin.value) {
+        this.totalValue += coin.value;
+      }
+      
         // 移除金币
         this.removeCoin(coin, index);
+      });
+    },
+    
+    // 新增：检查金币的堆叠情况
+    checkCoinStacking() {
+      if (this.coins.length < 3) return; // 不足3个金币无需检查堆叠
+      
+      // 创建一个数组存储需要向下移动的金币
+      const coinsToMove = [];
+      
+      // 创建访问标记对象，防止重复计算
+      const visitedCoins = {};
+      
+      // 遍历所有金币
+      this.coins.forEach(coin => {
+        // 忽略正在掉落或动画中的金币
+        if (coin.plugin && (coin.plugin.isDropping || coin.plugin.animatingRemoval)) {
+          return;
+        }
+        
+        // 计算当前金币的堆叠层数 - 使用非递归方法
+        const stackLayers = this.calculateCoinStackLayers(coin, visitedCoins);
+        
+        // 如果金币下方堆叠了超过2层（总共超过3层），标记为需要移动
+        if (stackLayers > 2) {
+          coinsToMove.push({
+            coin,
+            stackLayers
+          });
+        }
+      });
+      
+      // 对需要移动的金币按堆叠层数从高到低排序，优先处理最底层的金币
+      coinsToMove.sort((a, b) => b.stackLayers - a.stackLayers);
+      
+      // 处理需要移动的金币
+      coinsToMove.forEach(({ coin }) => {
+        // 应用向下移动的力
+        this.applyStackingForce(coin);
+      });
+    },
+    
+    // 计算金币的堆叠层数 - 非递归实现
+    calculateCoinStackLayers(coin, visitedCoins = {}) {
+      // 使用唯一ID标识金币 - 使用位置和值作为简单标识
+      const coinId = `${coin.id || Math.round(coin.position.x)}-${Math.round(coin.position.y)}-${coin.value || 0}`;
+      
+      // 如果已经访问过这个金币，返回默认层数1，防止循环引用
+      if (visitedCoins[coinId]) {
+        return 1;
+      }
+      
+      // 标记为已访问
+      visitedCoins[coinId] = true;
+      
+      // 层数计算采用迭代方式，避免深度递归
+      let maxStackHeight = 1; // 当前金币算一层
+      let currentLayerCoins = [coin]; // 当前层的金币
+      let layerCount = 0;
+      
+      // 最多检查5层，防止过度计算
+      const MAX_LAYERS = 5;
+      
+      while (currentLayerCoins.length > 0 && layerCount < MAX_LAYERS) {
+        layerCount++;
+        
+        // 当前层所有金币的下方金币
+        const nextLayerCoins = [];
+        
+        // 对当前层的每个金币，找出它下方的金币
+        for (const currentCoin of currentLayerCoins) {
+          const belowCoins = this.findCoinsBelow(currentCoin, visitedCoins);
+          nextLayerCoins.push(...belowCoins);
+        }
+        
+        // 如果找到下一层的金币，更新最大堆叠高度
+        if (nextLayerCoins.length > 0) {
+          maxStackHeight = layerCount + 1;
+          currentLayerCoins = nextLayerCoins;
+      } else {
+          // 没有更多层了，退出循环
+          break;
+        }
+      }
+      
+      return maxStackHeight;
+    },
+    
+    // 查找金币下方的所有金币
+    findCoinsBelow(coin, visitedCoins = {}) {
+      // 检测半径 - 根据金币半径稍微扩大一些
+      const coinRadius = coin.circleRadius || 22.5;
+      const detectionRadius = coinRadius * 1.8; // 略大于金币直径，考虑一些重叠
+      
+      return this.coins.filter(otherCoin => {
+        // 排除自身
+        if (otherCoin === coin) return false;
+        
+        // 使用唯一ID标识金币
+        const otherCoinId = `${otherCoin.id || Math.round(otherCoin.position.x)}-${Math.round(otherCoin.position.y)}-${otherCoin.value || 0}`;
+        
+        // 如果已经访问过这个金币，跳过
+        if (visitedCoins[otherCoinId]) return false;
+        
+        // 排除正在掉落或动画中的金币
+        if (otherCoin.plugin && (otherCoin.plugin.isDropping || otherCoin.plugin.animatingRemoval)) {
+          return false;
+        }
+        
+        // 检查是否在水平方向上足够接近
+        const dx = Math.abs(otherCoin.position.x - coin.position.x);
+        if (dx > coinRadius) return false;
+        
+        // 检查是否在当前金币的下方
+        const dy = otherCoin.position.y - coin.position.y;
+        if (dy <= 0 || dy > detectionRadius) return false;
+        
+        // 标记为已访问
+        visitedCoins[otherCoinId] = true;
+        
+        return true;
+      });
+    },
+    
+    // 对需要移动的金币应用向下力
+    applyStackingForce(coin) {
+      // 如果金币已经有下落标记，不再重复应用力
+      if (coin.plugin && coin.plugin.stackingForceApplied) {
+        // 检查是否已经应用力超过1秒，如果是则移除标记以便重新计算
+        const now = Date.now();
+        const elapsedTime = now - coin.plugin.stackingForceTime;
+        if (elapsedTime < 1000) {
+          return; // 在1秒内不重复应用力
+        }
+      }
+      
+      // 标记金币正在受到堆叠力
+      coin.plugin = coin.plugin || {};
+      coin.plugin.stackingForceApplied = true;
+      coin.plugin.stackingForceTime = Date.now();
+      
+      // 计算下落力的方向和大小
+      // 主要是向下的力，但添加一些随机横向分量避免卡死
+      const forceMagnitude = 0.01; // 堆叠力大小
+      const forceX = (Math.random() - 0.5) * forceMagnitude * 0.4; // 小的横向随机分量
+      const forceY = forceMagnitude; // 主要向下分量
+      
+      // 应用堆叠下落力
+      this.Body.applyForce(coin, coin.position, {
+        x: forceX,
+        y: forceY
+      });
+      
+      // 降低摩擦力，使金币更容易移动
+      const originalFriction = {
+        friction: coin.friction || 1.5,
+        frictionAir: coin.frictionAir || 0.5,
+        frictionStatic: coin.frictionStatic || 1.5
+      };
+      
+      // 存储原始摩擦力便于恢复
+      coin.plugin.originalFriction = originalFriction;
+      
+      // 设置临时低摩擦力
+      this.Body.set(coin, {
+        friction: 0.2,           // 非常低的摩擦力
+        frictionAir: 0.05,       // 低空气阻力
+        frictionStatic: 0.1      // 低静摩擦力
+      });
+      
+      // 添加一些初始速度帮助金币移动
+      const currentVelocity = coin.velocity;
+      this.Body.setVelocity(coin, {
+        x: currentVelocity.x + forceX * 100,
+        y: currentVelocity.y + forceY * 100
+      });
+      
+      // 添加一些旋转帮助金币移动
+      this.Body.setAngularVelocity(coin, coin.angularVelocity + (Math.random() - 0.5) * 0.1);
+      
+      // 为金币添加推动传播标记
+      coin.plugin.propagatingForce = true;
+      
+      // 找到下方金币并传播推力
+      this.propagateStackingForce(coin, forceMagnitude, 1);
+      
+      // 0.5秒后恢复正常摩擦力
+      setTimeout(() => {
+        if (coin && coin.plugin && coin.plugin.originalFriction) {
+          this.Body.set(coin, coin.plugin.originalFriction);
+          delete coin.plugin.originalFriction;
+        }
+        
+        // 移除推力传播标记
+        if (coin && coin.plugin) {
+          delete coin.plugin.propagatingForce;
+        }
+        
+        // 1秒后移除堆叠力标记，允许重新应用
+        setTimeout(() => {
+          if (coin && coin.plugin) {
+            delete coin.plugin.stackingForceApplied;
+          }
+        }, 500);
+      }, 500);
+    },
+    
+    // 新增：传播堆叠力到下方金币
+    propagateStackingForce(sourceCoin, initialForceMagnitude, depth) {
+      // 限制传播深度，避免过度传播
+      if (depth > 5) return;
+      
+      // 找到下方受影响的金币
+      const belowCoins = this.findDirectlyBelowCoins(sourceCoin);
+      if (belowCoins.length === 0) return;
+      
+      // 计算每个下方金币接收的力
+      // 力随着传播深度减弱
+      const forceDampingFactor = 0.8; // 每层减弱20%
+      const propagatedForceMagnitude = initialForceMagnitude * Math.pow(forceDampingFactor, depth);
+      
+      // 力大小低于阈值时停止传播
+      if (propagatedForceMagnitude < 0.001) return;
+      
+      // 对每个下方金币应用力并继续传播
+      belowCoins.forEach(belowCoin => {
+        // 排除已经在传播力的金币，避免循环
+        if (belowCoin.plugin && belowCoin.plugin.propagatingForce) return;
+        
+        // 计算相对位置确定力的方向
+        const dx = belowCoin.position.x - sourceCoin.position.x;
+        const dy = belowCoin.position.y - sourceCoin.position.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // 力的方向 - 主要向下，但保留一些水平分量
+        const normalizedDx = dx / distance || 0; // 防止除以零
+        const normalizedDy = dy / distance || 0;
+        
+        // 应用力 - 力的大小会随着传播距离减弱
+        const forceX = normalizedDx * propagatedForceMagnitude * 0.3; // 水平分量较小
+        const forceY = Math.max(0.3, normalizedDy) * propagatedForceMagnitude; // 垂直分量保证向下
+        
+        this.Body.applyForce(belowCoin, belowCoin.position, {
+          x: forceX,
+          y: forceY
+        });
+        
+        // 给下层金币一个速度脉冲，确保移动
+        const velocityImpulse = {
+          x: normalizedDx * propagatedForceMagnitude * 50,
+          y: Math.max(0.3, normalizedDy) * propagatedForceMagnitude * 80
+        };
+        
+        this.Body.setVelocity(belowCoin, {
+          x: belowCoin.velocity.x + velocityImpulse.x,
+          y: belowCoin.velocity.y + velocityImpulse.y
+        });
+        
+        // 添加轻微的旋转
+        this.Body.setAngularVelocity(belowCoin, belowCoin.angularVelocity + (Math.random() - 0.5) * 0.05 * propagatedForceMagnitude);
+        
+        // 临时降低下方金币的摩擦力，使其更容易移动
+        const originalFriction = {
+          friction: belowCoin.friction || 1.5,
+          frictionAir: belowCoin.frictionAir || 0.5,
+          frictionStatic: belowCoin.frictionStatic || 1.5
+        };
+        
+        belowCoin.plugin = belowCoin.plugin || {};
+        belowCoin.plugin.stackingForcePropagated = true;
+        belowCoin.plugin.originalFriction = originalFriction;
+        belowCoin.plugin.propagatingForce = true;
+        
+        this.Body.set(belowCoin, {
+          friction: 0.3,           // 降低摩擦力
+          frictionAir: 0.1,        // 降低空气阻力
+          frictionStatic: 0.2      // 降低静摩擦力
+        });
+        
+        // 继续向下传播力，递增深度
+        setTimeout(() => {
+          this.propagateStackingForce(belowCoin, propagatedForceMagnitude, depth + 1);
+        }, 50 * depth); // 稍微延迟传播，使动画更自然
+        
+        // 延迟恢复下方金币的原始摩擦力
+        setTimeout(() => {
+          if (belowCoin && belowCoin.plugin && belowCoin.plugin.originalFriction) {
+            this.Body.set(belowCoin, belowCoin.plugin.originalFriction);
+            delete belowCoin.plugin.originalFriction;
+            delete belowCoin.plugin.stackingForcePropagated;
+            delete belowCoin.plugin.propagatingForce;
+          }
+        }, 300 + 100 * depth); // 传播越深，恢复摩擦力的时间越长
+      });
+    },
+    
+    // 查找直接位于金币下方的金币
+    findDirectlyBelowCoins(coin) {
+      // 检测半径 - 根据金币半径稍微扩大一些
+      const coinRadius = coin.circleRadius || 22.5;
+      const detectionWidth = coinRadius * 1.2; // 略大于金币直径，只查找正下方
+      const detectionHeight = coinRadius * 1.8; // 查找距离为金币直径的1.8倍
+      
+      return this.coins.filter(otherCoin => {
+        // 排除自身
+        if (otherCoin === coin) return false;
+        
+        // 排除正在掉落或动画中的金币
+        if (otherCoin.plugin && (otherCoin.plugin.isDropping || otherCoin.plugin.animatingRemoval)) {
+          return false;
+        }
+        
+        // 检查是否在水平方向上正下方
+        const dx = Math.abs(otherCoin.position.x - coin.position.x);
+        if (dx > detectionWidth) return false;
+        
+        // 检查是否在垂直方向上足够近
+        const dy = otherCoin.position.y - coin.position.y;
+        if (dy <= 0 || dy > detectionHeight) return false;
+        
+        return true;
       });
     },
   },
