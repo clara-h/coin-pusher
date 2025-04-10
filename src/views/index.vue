@@ -220,7 +220,7 @@ export default {
           restitution: 0,        // 无弹性
           render: {
             fillStyle: '#FF5722', // 橙红色，更醒目
-            visible: true
+            visible: false
           },
           collisionFilter: {
             category: 0x0002,
@@ -239,13 +239,13 @@ export default {
         (350 + this.dropArea.y) / 2, // 中心y坐标 (movableObstacle和顶部障碍物的中点)
         400, // 顶部宽度
         350 - this.dropArea.y, // 高度，从顶部障碍物到movableObstacle的距离
-        0.2, // 负斜度，使其下宽上窄
+        0.18, // 负斜度，使其下宽上窄
         {
           isStatic: true,        // 设为静态，不可移动
           isSensor: true,        // 设为传感器，不会产生物理碰撞
           render: {
             fillStyle: 'rgba(255, 255, 0, 0.1)', // 半透明黄色，便于调试
-            visible: true       // 设为可见
+            visible: false       // 设为可见
           },
           // 自定义属性
           plugin: {
@@ -1075,53 +1075,93 @@ export default {
       if (!this.platformMotion.platform) return;
       
       const platform = this.platformMotion.platform;
-      const platformBounds = platform.bounds;
-      const platformWidth = platformBounds.max.x - platformBounds.min.x;
       
-      // 初始化platform.customData
+      // 初始化或获取platform.customData
       if (!platform.customData) {
         platform.customData = {
           direction: 1,
           speed: 0.8,
           lowerBound: this.platformMotion.baseY + this.platformMotion.amplitude,
-          upperBound: this.platformMotion.baseY - this.platformMotion.amplitude
+          upperBound: this.platformMotion.baseY - this.platformMotion.amplitude,
+          baseWidth: 400 * 0.8, // 基础宽度
+          minWidth: 400 * 0.8,  // 最小宽度（收缩时）
+          maxWidth: 400 * 0.85   // 最大宽度（下移时）
         };
       }
       
-      // 获取当前位置
+      // 获取当前位置和方向
       const oldY = platform.position.y;
+      const currentDirection = platform.customData.direction;
+      const currentSpeed = platform.customData.speed;
       
       // 使用固定速度计算新位置
-      let newY = oldY + (platform.customData.direction * platform.customData.speed);
+      let newY = oldY + (currentDirection * currentSpeed);
       
       // 检查是否到达边界点，如果是则改变方向
+      let newDirection = currentDirection;
       if (newY >= platform.customData.lowerBound) {
         newY = platform.customData.lowerBound;
-        platform.customData.direction = -1; // 改变方向向上
+        newDirection = -1; // 改变方向向上
       } else if (newY <= platform.customData.upperBound) {
         newY = platform.customData.upperBound;
-        platform.customData.direction = 1; // 改变方向向下
+        newDirection = 1; // 改变方向向下
       }
       
-      // 设置平台位置
-      this.Body.setPosition(platform, {
-        x: platform.position.x,
-        y: newY
-      });
+      // 计算当前位置相对于移动范围的比例
+      const moveRange = platform.customData.lowerBound - platform.customData.upperBound;
+      const currentPosition = newY - platform.customData.upperBound;
+      const positionRatio = currentPosition / moveRange;
       
-      // 计算移动的距离
-      const deltaY = newY - oldY;
+      // 根据位置计算当前宽度
+      const widthRange = platform.customData.maxWidth - platform.customData.minWidth;
+      const currentWidth = platform.customData.minWidth + (widthRange * positionRatio);
       
-      // 设置平台速度
-      this.Body.setVelocity(platform, {
-        x: 0,
-        y: platform.customData.direction * platform.customData.speed
-      });
+      // 保存当前的customData
+      const customData = {
+        ...platform.customData,
+        direction: newDirection
+      };
+      
+      // 创建新的推板
+      const newPlatform = this.Bodies.rectangle(
+        200, // x位置保持不变
+        newY, // 新的y位置
+        currentWidth, // 当前计算出的宽度
+        10, // 高度保持不变
+        {
+          isStatic: true,
+          chamfer: { radius: 2 },
+          render: {
+            fillStyle: 'rgba(156, 39, 176, 0.8)',
+            visible: true
+          },
+          friction: 0.3,
+          frictionStatic: 0.5,
+          restitution: 0.2,
+          slop: 0.05,
+          plugin: {
+            isMovablePlatform: true
+          }
+        }
+      );
+      
+      // 设置新推板的customData
+      newPlatform.customData = customData;
+      
+      // 从世界中移除旧推板
+      this.World.remove(this.engine.world, platform);
+      
+      // 添加新推板到世界
+      this.World.add(this.engine.world, newPlatform);
+      
+      // 更新推板引用
+      this.platformMotion.platform = newPlatform;
       
       // 检查推板是否在收缩（向上移动）
-      if (platform.customData.direction < 0) {
+      if (newDirection < 0) {
         // 查找推板上的金币
         this.coins.forEach(coin => {
+          const platformBounds = newPlatform.bounds;
           // 检查金币是否在推板范围内
           if (coin.position.x >= platformBounds.min.x && 
               coin.position.x <= platformBounds.max.x && 
@@ -1156,94 +1196,8 @@ export default {
           }
         });
       }
-      
-      // 处理平台扩展区域内的金币
-      const extendedRegion = {
-        min: { x: platformBounds.min.x - 5, y: platformBounds.min.y - 15 },
-        max: { x: platformBounds.max.x + 5, y: platformBounds.max.y + 35 }
-      };
-      
-      // 创建一个集合来存储已经处理过的金币
-      const processedCoins = new Set();
-      
-      // 递归函数：传递力给下方的金币
-      const applyForceToBelowCoins = (coin, force, depth = 0) => {
-        if (depth > 8) return; // 限制递归深度
-        
-        // 查找下方的金币
-        this.coins.forEach(belowCoin => {
-          if (processedCoins.has(belowCoin)) return;
-          
-          // 计算金币之间的距离
-          const distX = Math.abs(coin.position.x - belowCoin.position.x);
-          const distY = belowCoin.position.y - coin.position.y;
-          
-          // 如果金币在下方且距离合适
-          if (distY > 0 && distY < 20 && distX < 20) {
-            processedCoins.add(belowCoin);
-            
-            // 应用递减的力
-            const reducedForce = {
-              x: force.x * 0.2,
-              y: force.y * 0.2
-            };
-            
-            // 应用力
-            this.Body.applyForce(belowCoin, belowCoin.position, reducedForce);
-            
-            // 递归处理更下方的金币
-            applyForceToBelowCoins(belowCoin, reducedForce, depth + 1);
-          }
-        });
-      };
-      
-      this.coins.forEach(coin => {
-        // 检查金币是否在扩展区域内但尚未被处理
-        if (coin.position.x >= extendedRegion.min.x && 
-            coin.position.x <= extendedRegion.max.x && 
-            coin.position.y >= extendedRegion.min.y && 
-            coin.position.y <= extendedRegion.max.y &&
-            (!coin.plugin || !coin.plugin.affectedByPlatform)) {
-          
-          // 计算金币到平台的距离
-          const distX = Math.abs(coin.position.x - platform.position.x);
-          const distY = platform.customData.direction > 0 ? 
-                       coin.position.y - platformBounds.max.y : 
-                       platformBounds.min.y - coin.position.y;
-          
-          // 如果金币足够接近平台
-          if (distX < platformWidth / 2 && distY > 0 && distY < 20) {
-            // 只在平台向下移动时应用推力
-            if (platform.customData.direction > 0) {
-              // 初始推力
-              const initialForce = {
-                x: 0,
-                y: 0.0008
-              };
-              
-              // 应用初始力
-              this.Body.applyForce(coin, coin.position, initialForce);
-              
-              // 标记金币已被处理
-              processedCoins.add(coin);
-              
-              // 开始力的传递
-              applyForceToBelowCoins(coin, initialForce);
-            }
-          }
-        }
-      });
-      
-      // 重置标记，以便下一次检测
-      setTimeout(() => {
-        this.coins.forEach(coin => {
-          if (coin.plugin) {
-            coin.plugin.affectedByPlatform = false;
-          }
-        });
-      }, 50);
     },
-
+    
     // 添加新方法：检查金币是否受到较大压力
     checkCoinPressure(coin) {
       // 如果金币已经有压力标记，检查是否已经持续足够长时间
