@@ -139,7 +139,7 @@ export default {
       // 创建边界 - 使用渐变色边界
       const walls = [
         // 底部边界 - 可见
-        this.Bodies.rectangle(200, 400, 390, 20, { 
+        this.Bodies.rectangle(200, 400, 240, 20, { 
           isStatic: true, 
           render: { 
             fillStyle: '#9c27b0',
@@ -153,49 +153,36 @@ export default {
             visible: false 
           } 
         }),
-        // 左侧边界
-        this.Bodies.rectangle(-10, 200, 20, 400, { 
-          isStatic: true, 
-          render: { 
-            visible: false 
-          } 
+        
+        // 上宽下窄的等腰形边界 - 左侧斜边
+        this.Bodies.fromVertices(0, 130, [
+          { x: 0, y: 0 },     // 左上
+          { x: 84, y: 0 },    // 左上宽边
+          { x: 40, y: 400 }   // 左下窄边
+        ], {
+          isStatic: true,
+          render: {
+            fillStyle: '#6d4c41',
+            visible: true
+          }
         }),
-        // 右侧边界
-        this.Bodies.rectangle(410, 200, 20, 400, { 
-          isStatic: true, 
-          render: { 
-            fillStyle: '#999',
-            visible: true 
-          } 
+        
+        // 上宽下窄的等腰形边界 - 右侧斜边
+        this.Bodies.fromVertices(400, 130, [
+          { x: 312, y: 0 },    // 右上宽边
+          { x: 400, y: 0 },    // 右上
+          { x: 350, y: 400 }   // 右下窄边
+        ], {
+          isStatic: true,
+          render: {
+            fillStyle: '#6d4c41',
+            visible: true
+          }
         }),
-        // 收集区域平台 - 左挡板
-        // this.Bodies.rectangle(this.collectionArea.x - this.collectionArea.width/2, 
-        //                      this.collectionArea.y + this.collectionArea.height/2, 
-        //                      20, this.collectionArea.height, { 
-        //   isStatic: true, 
-        //   render: { 
-        //     fillStyle: '#999',
-        //     visible: true
-        //   },
-        //   friction: 0.1, // 降低摩擦力
-        //   restitution: 0.9 // 增加弹性
-        // }),
-        // 收集区域平台 - 右挡板
-        // this.Bodies.rectangle(this.collectionArea.x + this.collectionArea.width/2, 
-        //                      this.collectionArea.y + this.collectionArea.height/2, 
-        //                      20, this.collectionArea.height, { 
-        //   isStatic: true, 
-        //   render: { 
-        //     fillStyle: '#999',
-        //     visible: true
-        //   },
-        //   friction: 0.1, // 降低摩擦力
-        //   restitution: 0.9 // 增加弹性
-        // }),
+        
         // 掉落区域上方的长条障碍物 - 现在作为可移动底板
-        this.Bodies.rectangle(200, this.dropArea.y, 400, 10, { 
+        this.Bodies.rectangle(200, this.dropArea.y, 400 * 0.8, 10, { 
           isStatic: true, 
-          // angle: Math.PI * 0.03, // 略微倾斜，增加趣味性
           chamfer: { radius: 2 }, // 轻微圆角
           render: { 
             fillStyle: 'rgba(156, 39, 176, 0.8)', // 使用原底板的颜色但更明显
@@ -210,11 +197,20 @@ export default {
           }
         })
       ];
+      
+      // 更新金币投放区域
+      this.dropArea = {
+        minX: 80,   // 左边界
+        maxX: 320,  // 右边界
+        y: 30,      // 掉落高度
+        width: 240  // 掉落宽度
+      };
+      
       // 创建固定在底部的高摩擦力条
       const movableObstacle = this.Bodies.rectangle(
         200, // 中心x坐标
         350, // 底部位置，接近游戏区域底部
-        this.movableObstacle.width,
+        396, // 宽度适应新的等腰形（下窄）
         this.movableObstacle.height,
         {
           isStatic: true,        // 设为静态，不可移动
@@ -238,17 +234,18 @@ export default {
       );
       
       // 创建从movableObstacle到顶部障碍物之间的高摩擦力区域
-      const frictionZone = this.Bodies.rectangle(
+      const frictionZone = this.Bodies.trapezoid(
         200, // 中心x坐标
         (350 + this.dropArea.y) / 2, // 中心y坐标 (movableObstacle和顶部障碍物的中点)
-        400, // 宽度，覆盖整个游戏区域宽度
+        400, // 顶部宽度
         350 - this.dropArea.y, // 高度，从顶部障碍物到movableObstacle的距离
+        0.2, // 负斜度，使其下宽上窄
         {
           isStatic: true,        // 设为静态，不可移动
           isSensor: true,        // 设为传感器，不会产生物理碰撞
           render: {
             fillStyle: 'rgba(255, 255, 0, 0.1)', // 半透明黄色，便于调试
-            visible: false       // 设为不可见
+            visible: true       // 设为可见
           },
           // 自定义属性
           plugin: {
@@ -603,8 +600,6 @@ export default {
       let actualCoinCount = coinCount; // 默认使用指定数量
       
       const coinValues = [1, 5, 10, 25, 50]; // 金币面值
-      
-
 
       // 设置掉落金币的时间间隔 - 根据硬件性能和数量调整
       const baseInterval = this.engine && this.engine.timing && this.engine.timing.lastDelta > 20 
@@ -612,9 +607,9 @@ export default {
         : 150; // 默认间隔
       
       // 根据金币数量调整间隔，数量越多间隔越短
-      const dropInterval = actualCoinCount > 30 
+      const dropInterval = actualCoinCount > 30
         ? Math.max(50, baseInterval - 80) // 大量金币时缩短间隔
-        : (actualCoinCount > 15 
+        : (actualCoinCount > 15
             ? Math.max(80, baseInterval - 40) // 中等数量时略微缩短
             : baseInterval); // 少量使用默认间隔
       
@@ -1249,7 +1244,6 @@ export default {
       }, 50);
     },
 
-    
     // 添加新方法：检查金币是否受到较大压力
     checkCoinPressure(coin) {
       // 如果金币已经有压力标记，检查是否已经持续足够长时间
@@ -1313,7 +1307,7 @@ export default {
       
       // 批量处理金币
       for (let i = this.coins.length - 1; i >= 0; i--) {
-        const coin = this.coins[i];
+            const coin = this.coins[i];
         
         // 检查金币是否超出边界
         if (coin.position.y > plateBottomY + 50) {
@@ -2299,15 +2293,6 @@ export default {
       this.playCoinDropSound();
     },
     
-    // 修改：processCoinsPhysics 方法
-    processCoinsPhysics(coin, distToPlate, isUnderPressure, coinData) {
-      // ... existing code ...
-      
-      // 3. 处理已穿过摩擦板的金币 - 移除这个部分，改为在updateCoinPassThroughStatus中处理
-      // 穿过摩擦板的金币会被startCoinRemovalAnimation处理，不需要在这里额外处理
-      
-      // ... existing code ...
-    },
     
     // 新增：限制总金币数量
     enforceCoinLimit() {
