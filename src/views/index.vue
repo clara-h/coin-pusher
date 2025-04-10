@@ -68,7 +68,8 @@ export default {
         baseY: 0,         // 基准Y位置
         amplitude: 30,    // 上下移动幅度，减小为固定值
         frequency: 0.015,  // 移动频率，设置为固定值
-        time: 0           // 计时器
+        time: 0,           // 计时器
+        zIndex: 1,      // 设置z-index为1000
       },
       // 底部高摩擦力条
       movableObstacle: {
@@ -577,7 +578,7 @@ export default {
         totalContacts: 0,
         speed: 0,
         angularSpeed: 0,
-        motion: 0
+        motion: 0,
       });
 
       // 确保渲染属性被正确重置
@@ -676,6 +677,8 @@ export default {
             density: 0.3,     // 增加密度，使冲击力更强
             // 轻微旋转
             inertia: Infinity,
+            // 层级
+            zIndex: 3,
             plugin: {
               isDropping: true, // 标记为正在掉落
               dropStartTime: Date.now(),
@@ -1152,8 +1155,8 @@ export default {
           isStatic: true,
           chamfer: { radius: 2 },
           render: {
-            fillStyle: 'rgba(156, 39, 176, 0.8)',
-            visible: true
+            fillStyle: 'rgba(156, 39, 176, 1)',
+            visible: false
           },
           friction: 0.3,
           frictionStatic: 0.5,
@@ -2391,7 +2394,7 @@ export default {
       
       // 计算coin-box-top的高度
       // 我们让高度从50px到80px变化，与推板位置成正比
-      const minHeight = 0;
+      const minHeight = 20;
       const maxHeight = 70;
       const heightRange = maxHeight - minHeight;
       const newHeight = minHeight + (heightRange * positionRatio);
@@ -2474,7 +2477,6 @@ export default {
 
 .game-area {
   position: relative;
-  background: #2A2A2A;
 }
 
 .coin-box {
