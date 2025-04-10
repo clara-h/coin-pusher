@@ -335,6 +335,9 @@ export default {
         // 根据金币总数动态调整摩擦力板效果
         this.adjustCoinPassThroughRate();
         
+        // 限制金币旋转角度
+        this.limitCoinRotation();
+        
         // 性能优化：分散高消耗操作
         if (timestamp % 2 === 0) { // 每2帧执行一次
           // 使用合并优化后的方法检查所有金币
@@ -633,7 +636,7 @@ export default {
           x: this.getRandomInt(this.dropArea.minX, this.dropArea.maxX),
           y: startY // 从高处开始掉落
         };
-        const angle = Math.random() * Math.PI * 2;
+        const angle = 0
         // 初始速度设为0，会在动画中逐渐增加
         const velocity = {
           x: 0,
@@ -664,6 +667,8 @@ export default {
             frictionAir: 0.05, // 降低空气阻力，使下落更快
             frictionStatic: 0.8, // 降低静摩擦力
             density: 0.3,     // 增加密度，使冲击力更强
+            // 轻微旋转
+            inertia: Infinity,
             plugin: {
               isDropping: true, // 标记为正在掉落
               dropStartTime: Date.now(),
@@ -693,8 +698,10 @@ export default {
             density: 0.3,     // 增加密度，使冲击力更强
             chamfer: { radius: 2 },
             mass: 0.3, // 增加质量，使冲击力更强
-            inertia: Infinity,
-            inverseInertia: 0,
+            inertia: Infinity, // 防止旋转
+            inverseInertia: 0, // 防止旋转
+            // 新增：增加旋转阻力
+            frictionAngular: 0.8, // 增加角摩擦力，减少旋转
             render: {
               visible: true,
               opacity: 1,
@@ -761,7 +768,7 @@ export default {
           this.Body.setVelocity(coin, impactVelocity);
           
           // 添加旋转
-          this.Body.setAngularVelocity(coin, (Math.random() - 0.2) * 0.2);
+          this.Body.setAngularVelocity(coin, (Math.random() - 0.5) * 0.05);
           
           // 应用冲击力到周围的金币
           this.applyImpactForce(coin);
@@ -841,7 +848,7 @@ export default {
           this.Body.setVelocity(targetCoin, newVelocity);
           
           // 添加旋转
-          this.Body.setAngularVelocity(targetCoin, targetCoin.angularVelocity + (Math.random() - 0.5) * 0.1);
+          // this.Body.setAngularVelocity(targetCoin, targetCoin.angularVelocity + (Math.random() - 1) * 0.1);
           
           // 标记为受到冲击
           targetCoin.plugin = targetCoin.plugin || {};
@@ -1847,7 +1854,7 @@ export default {
       });
       
       // 添加一些旋转帮助金币移动
-      this.Body.setAngularVelocity(coin, coin.angularVelocity + (Math.random() - 0.5) * 0.1);
+      this.Body.setAngularVelocity(coin, coin.angularVelocity + (Math.random() - 0.5) * 0.02); // 添加一些旋转帮助金币移动
       
       // 为金币添加推动传播标记
       coin.plugin.propagatingForce = true;
@@ -1928,7 +1935,7 @@ export default {
         });
         
         // 添加轻微的旋转
-        this.Body.setAngularVelocity(belowCoin, belowCoin.angularVelocity + (Math.random() - 0.5) * 0.05 * propagatedForceMagnitude);
+        this.Body.setAngularVelocity(belowCoin, belowCoin.angularVelocity + (Math.random() - 0.5) * 0.02 * propagatedForceMagnitude); // 添加轻微的旋转
         
         // 临时降低下方金币的摩擦力，使其更容易移动
         const originalFriction = {
@@ -2247,7 +2254,7 @@ export default {
       this.Body.setVelocity(coin, exitVelocity);
       
       // 添加一些旋转效果使动画更生动
-      this.Body.setAngularVelocity(coin, (Math.random() - 0.5) * 0.2);
+      this.Body.setAngularVelocity(coin, (Math.random() - 0.5) * 0.05); // 添加一些旋转效果使动画更生动
       
       // 播放金币消失的音效
       this.playCoinDropSound();
@@ -2332,6 +2339,40 @@ export default {
         const distToPlate = Math.abs(coin.position.y - plateTopY);
         return distToPlate < nearDistance;
       }).length;
+    },
+    // 添加新方法：限制金币旋转角度
+    limitCoinRotation() {
+      // 最大允许旋转角度（弧度）
+      const MAX_ROTATION = Math.PI / 6; // 30度，转换为弧度
+      
+      this.coins.forEach(coin => {
+        // 获取当前角度并归一化到 [-π, π] 范围
+        let angle = coin.angle % (Math.PI * 2);
+        if (angle > Math.PI) angle -= Math.PI * 2;
+        if (angle < -Math.PI) angle += Math.PI * 2;
+        
+        // 检查角度是否超出限制
+        if (Math.abs(angle) > MAX_ROTATION) {
+          // 计算需要设置的新角度
+          const newAngle = angle > 0 ? MAX_ROTATION : -MAX_ROTATION;
+          
+          // 设置新角度
+          this.Body.setAngle(coin, newAngle);
+          
+          // 如果角速度过大，降低角速度
+          if (Math.abs(coin.angularVelocity) > 0.05) {
+            const newAngularVelocity = coin.angularVelocity > 0 ? 0.05 : -0.05;
+            this.Body.setAngularVelocity(coin, newAngularVelocity);
+          }
+          
+          // 如果角度接近最大值，添加反向力矩防止过度旋转
+          if (Math.abs(angle) > MAX_ROTATION * 0.9) {
+            // 计算反向角速度
+            const dampening = -0.8 * coin.angularVelocity;
+            this.Body.setAngularVelocity(coin, dampening);
+          }
+        }
+      });
     },
   },
   beforeDestroy() {
