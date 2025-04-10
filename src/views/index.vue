@@ -10,6 +10,9 @@
     <div class="game-area">
       <div ref="coinBox" class="coin-box">
       </div>
+      <!--顶部推板背景-->
+      <div class="coin-box-top"></div>
+      <!--收集金币掉落区域背景-->
       <div class="coin-box-bottom"></div>
     </div>
   </div>
@@ -79,11 +82,15 @@ export default {
       // 新增：用于优化纹理预缓存
       offscreenCoinTextures: {},
       MAX_COINS: 40,  // 最大金币数量
+      // 新增：coin-box-top元素引用
+      coinBoxTopEl: null,
     }
   },
   mounted() {
     // 初始化物理引擎
     this.InitPhysics()
+    // 获取coin-box-top元素引用
+    this.coinBoxTopEl = document.querySelector('.coin-box-top')
   },
   methods: {
     InitPhysics() {
@@ -187,7 +194,7 @@ export default {
           chamfer: { radius: 2 }, // 轻微圆角
           render: {
             fillStyle: 'rgba(156, 39, 176, 1)', // 使用原底板的颜色但更明显
-            visible: true
+            visible: false
           },
           friction: 0.3,          // 降低摩擦力以使物体更容易移动
           frictionStatic: 0.5,    // 降低静摩擦力
@@ -1170,6 +1177,9 @@ export default {
       // 更新推板引用
       this.platformMotion.platform = newPlatform;
       
+      // 同步更新coin-box-top元素
+      this.updateCoinBoxTop(newY, positionRatio);
+      
       // 检查推板是否在收缩（向上移动）
       if (newDirection < 0) {
         // 查找推板上的金币
@@ -1553,17 +1563,17 @@ export default {
           }
           
           // 检查金币是否超过顶部移动条（添加新的检查）
-          if (this.platformMotion.platform) {
-            const topPlatformTopY = this.platformMotion.platform.bounds.min.y;
-            // 确保金币半径信息存在
-            const coinRadius = coin.circleRadius || 22.5;
+          // if (this.platformMotion.platform) {
+          //   const topPlatformTopY = this.platformMotion.platform.bounds.min.y;
+          //   // 确保金币半径信息存在
+          //   const coinRadius = coin.circleRadius || 22.5;
             
-            if (coin.position.y < topPlatformTopY - coinRadius) {
-              console.log(`清理：发现超过顶部移动条的金币，强制移除`);
-              this.removeCoin(coin, i);
-              continue; // 此金币已移除，跳过后续检查
-            }
-          }
+          //   if (coin.position.y < topPlatformTopY - coinRadius) {
+          //     console.log(`清理：发现超过顶部移动条的金币，强制移除`);
+          //     this.removeCoin(coin, i);
+          //     continue; // 此金币已移除，跳过后续检查
+          //   }
+          // }
           
           // 额外检查：如果金币Y坐标超过游戏区域，也强制移除
           if (coin.position.y > 450) { // 超出游戏区域底部
@@ -2374,6 +2384,26 @@ export default {
         }
       });
     },
+    // 添加新方法来更新coin-box-top元素
+    updateCoinBoxTop(platformY, positionRatio) {
+      // 确保元素存在
+      if (!this.coinBoxTopEl) return;
+      
+      // 计算coin-box-top的高度
+      // 我们让高度从50px到80px变化，与推板位置成正比
+      const minHeight = 0;
+      const maxHeight = 70;
+      const heightRange = maxHeight - minHeight;
+      const newHeight = minHeight + (heightRange * positionRatio);
+      
+      // 设置coin-box-top的高度和top位置
+      this.coinBoxTopEl.style.height = `${newHeight}px`;
+      
+      // 可选：调整top位置，使元素底部对齐推板顶部
+      // 注意：platformY是推板中心位置，减去5是因为推板高度为10px
+      const topPosition = platformY - 5 - newHeight;
+      this.coinBoxTopEl.style.top = `${Math.max(0, topPosition)}px`;
+    },
   },
   beforeDestroy() {
     // 清理资源
@@ -2444,6 +2474,7 @@ export default {
 
 .game-area {
   position: relative;
+  background: #2A2A2A;
 }
 
 .coin-box {
@@ -2456,6 +2487,17 @@ export default {
   background: transparent;
   box-shadow: 0 10px 20px rgba(0,0,0,0.1);
   z-index: 10;
+}
+.coin-box-top{
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 400px;
+  height: 65px;
+  border-radius: 8px;
+  background: #7b1fa2;
+  overflow: hidden;
+  transition: height 0.05s ease, top 0.05s ease;
 }
 .coin-box-bottom {
   position: absolute;
