@@ -10,6 +10,7 @@
     <div class="game-area">
       <div ref="coinBox" class="coin-box">
       </div>
+      <div class="coin-box-bottom"></div>
     </div>
   </div>
 </template>
@@ -113,7 +114,7 @@ export default {
           width: 400,
           height: 400,
           wireframes: false,
-          background: '#f8f8f8',
+          background: 'transparent', // 透明背景
           showSleeping: false,    // 不渲染休眠的物体
           showDebug: false,       // 不显示调试信息
           showBroadphase: false,  // 不显示宽相检测
@@ -156,9 +157,9 @@ export default {
         
         // 上宽下窄的等腰形边界 - 左侧斜边
         this.Bodies.fromVertices(0, 130, [
-          { x: 0, y: 0 },     // 左上
+          { x: 10, y: 0 },     // 左上
           { x: 84, y: 0 },    // 左上宽边
-          { x: 40, y: 400 }   // 左下窄边
+          { x: 36, y: 400 }   // 左下窄边
         ], {
           isStatic: true,
           render: {
@@ -169,9 +170,9 @@ export default {
         
         // 上宽下窄的等腰形边界 - 右侧斜边
         this.Bodies.fromVertices(400, 130, [
-          { x: 312, y: 0 },    // 右上宽边
+          { x: 320, y: 0 },    // 右上宽边
           { x: 400, y: 0 },    // 右上
-          { x: 350, y: 400 }   // 右下窄边
+          { x: 360, y: 400 }   // 右下窄边
         ], {
           isStatic: true,
           render: {
@@ -2407,8 +2408,19 @@ export default {
   border-radius: 8px;
   overflow: hidden;
   position: relative;
-  background: linear-gradient(to bottom, #ffffff, #f5f5f5);
+  background: transparent;
   box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+  z-index: 10;
+}
+.coin-box-bottom {
+  position: absolute;
+  bottom: 65px;
+  width: 400px;
+  height: 65px;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  background: #7b1fa2;
 }
 
 .collection-area {
